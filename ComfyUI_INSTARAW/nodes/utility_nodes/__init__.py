@@ -1,5 +1,4 @@
-# ---
-# Filename: ../ComfyUI_INSTARAW/nodes/utility_nodes/__init__.py
+# Filename: ComfyUI_INSTARAW/nodes/utility_nodes/__init__.py
 # ---
 
 """
@@ -7,6 +6,7 @@ INSTARAW Utility Nodes
 Helper nodes for workflow convenience
 """
 
+# Keep all the working imports
 from .seed_generator import (
     NODE_CLASS_MAPPINGS as SEED_MAPPINGS,
     NODE_DISPLAY_NAME_MAPPINGS as SEED_DISPLAY_MAPPINGS,
@@ -39,11 +39,6 @@ from .workflow_logic_nodes import (
     NODE_CLASS_MAPPINGS as WORKFLOW_LOGIC_MAPPINGS,
     NODE_DISPLAY_NAME_MAPPINGS as WORKFLOW_LOGIC_DISPLAY_MAPPINGS,
 )
-from .detection_bypass import (
-    NODE_CLASS_MAPPINGS as BYPASS_MAPPINGS,
-    NODE_DISPLAY_NAME_MAPPINGS as BYPASS_DISPLAY_MAPPINGS,
-)
-
 from .list_utility_nodes import (
     INSTARAW_BatchFromImageList,
     INSTARAW_ImageListFromBatch,
@@ -74,9 +69,7 @@ from .json_utils import (
     NODE_CLASS_MAPPINGS as JSON_MAPPINGS,
     NODE_DISPLAY_NAME_MAPPINGS as JSON_DISPLAY_MAPPINGS,
 )
-from .detection_bypass_v2 import INSTARAW_DetectionBypass_V2 # Add this
-from .authenticity_v2 import INSTARAW_Authenticity_V2
-from .lut_selector import INSTARAW_LUT_Selector  # Add this import
+from .lut_selector import INSTARAW_LUT_Selector
 from .spectral_engine_node import (
     NODE_CLASS_MAPPINGS as SPECTRAL_ENGINE_MAPPINGS,
     NODE_DISPLAY_NAME_MAPPINGS as SPECTRAL_ENGINE_DISPLAY_MAPPINGS,
@@ -90,7 +83,7 @@ from .auto_white_balance_node import (
     NODE_DISPLAY_NAME_MAPPINGS as AWB_DISPLAY_MAPPINGS,
 )
 
-
+# --- CLEANED UP MAPPINGS ---
 NODE_CLASS_MAPPINGS = {
     **SEED_MAPPINGS,
     **MASK_MAPPINGS,
@@ -114,14 +107,11 @@ NODE_CLASS_MAPPINGS = {
     **BRANDING_MAPPINGS,
     **RESIZE_MAPPINGS,
     **MODEL_SELECTOR_MAPPINGS,
-    **JSON_MAPPINGS, 
-    **BYPASS_MAPPINGS, 
-    "INSTARAW_DetectionBypass_V2": INSTARAW_DetectionBypass_V2, # Add this
-    "INSTARAW_Authenticity_V2": INSTARAW_Authenticity_V2,
-    "INSTARAW_LUT_Selector": INSTARAW_LUT_Selector, # Add this
+    **JSON_MAPPINGS,
+    "INSTARAW_LUT_Selector": INSTARAW_LUT_Selector,
     **SPECTRAL_ENGINE_MAPPINGS,
     **COLOR_SCIENCE_MAPPINGS,
-    **AWB_MAPPINGS, # ADD THIS
+    **AWB_MAPPINGS,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -145,16 +135,13 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "INSTARAW_MaskCombine": "➕ INSTARAW Mask Combine",
     "INSTARAW_StringCombine": "✍️ INSTARAW String Combine (Safe)",
     **BRANDING_DISPLAY_MAPPINGS,
-    **RESIZE_DISPLAY_MAPPINGS, 
+    **RESIZE_DISPLAY_MAPPINGS,
     **MODEL_SELECTOR_DISPLAY_MAPPINGS,
     **JSON_DISPLAY_MAPPINGS,
-    **BYPASS_DISPLAY_MAPPINGS,
-    "INSTARAW_DetectionBypass_V2": "🛡️ INSTARAW Detection Bypass V2", # Add this
-    "INSTARAW_Authenticity_V2": "🛡️ INSTARAW Authenticity V2",
-    "INSTARAW_LUT_Selector": "🎨 INSTARAW LUT Selector", # Add this
+    "INSTARAW_LUT_Selector": "🎨 INSTARAW LUT Selector",
     **SPECTRAL_ENGINE_DISPLAY_MAPPINGS,
     **COLOR_SCIENCE_DISPLAY_MAPPINGS,
-    **AWB_MAPPINGS, # ADD THIS
+    **AWB_DISPLAY_MAPPINGS,
 }
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
