@@ -10,10 +10,7 @@ from .perturbation import randomized_perturbation
 from .glcm_normalization import glcm_normalize
 from .lbp_normalization import lbp_normalize
 from .non_semantic_unmarker import attack_non_semantic  # Simplified UnMarker
-from .unmarker_full import (
-    attack_two_stage_unmarker,
-    TwoStageUnMarker,
-)  # Full, GUIDED UnMarker
+from .unmarker_full import normalize_spectrum_twostage, SpectralNormalizer
 from .blend import blend_colors
 
 __all__ = [
@@ -28,7 +25,7 @@ __all__ = [
     "glcm_normalize",
     "lbp_normalize",
     "attack_non_semantic",
-    "attack_two_stage_unmarker",  # The main function we'll use
-    "TwoStageUnMarker",
+    'normalize_spectrum_twostage',
+    'SpectralNormalizer',
     "blend_colors",
 ]

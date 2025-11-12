@@ -1,8 +1,13 @@
+# Filename: ComfyUI_INSTARAW/modules/detection_bypass/utils/color_lut.py
+# ---
+
 import numpy as np
-import re, os
+import re
+import os
 from PIL import Image
 
 def apply_1d_lut(img_arr: np.ndarray, lut: np.ndarray, strength: float = 1.0) -> np.ndarray:
+    # ... (This function is correct and remains unchanged)
     if img_arr.ndim != 3 or img_arr.shape[2] != 3:
         raise ValueError("apply_1d_lut expects an HxWx3 image array")
     arr = img_arr.astype(np.float32)
@@ -26,28 +31,47 @@ def apply_1d_lut(img_arr: np.ndarray, lut: np.ndarray, strength: float = 1.0) ->
         return np.clip(blended, 0, 255).astype(np.uint8)
 
 def _trilinear_sample_lut(img_float: np.ndarray, lut: np.ndarray) -> np.ndarray:
+    """Corrected trilinear interpolation for a LUT with shape (S, S, S, 3)."""
     S = lut.shape[0]
-    if lut.shape[0] != lut.shape[1] or lut.shape[1] != lut.shape[2]:
-        raise ValueError("3D LUT must be cubic (SxSxSx3)")
-    idx = img_float * (S - 1)
-    r_idx, g_idx, b_idx = idx[..., 0], idx[..., 1], idx[..., 2]
-    r0, g0, b0 = np.floor(r_idx).astype(np.int32), np.floor(g_idx).astype(np.int32), np.floor(b_idx).astype(np.int32)
-    r1, g1, b1 = np.clip(r0 + 1, 0, S - 1), np.clip(g0 + 1, 0, S - 1), np.clip(b0 + 1, 0, S - 1)
-    dr, dg, db = (r_idx - r0)[..., None], (g_idx - g0)[..., None], (b_idx - b0)[..., None]
-    c000, c001 = lut[r0, g0, b0], lut[r0, g0, b1]
-    c010, c011 = lut[r0, g1, b0], lut[r0, g1, b1]
-    c100, c101 = lut[r1, g0, b0], lut[r1, g0, b1]
-    c110, c111 = lut[r1, g1, b0], lut[r1, g1, b1]
-    c00 = c000 * (1 - db) + c001 * db
-    c01 = c010 * (1 - db) + c011 * db
-    c10 = c100 * (1 - db) + c101 * db
-    c11 = c110 * (1 - db) + c111 * db
-    c0 = c00 * (1 - dg) + c01 * dg
-    c1 = c10 * (1 - dg) + c11 * dg
-    c = c0 * (1 - dr) + c1 * dr
+    # Scale image color values to LUT index coordinates [0, S-1]
+    scaled_coords = img_float * (S - 1)
+    
+    # Get the integer part (floor) and fractional part of the coordinates
+    coords_floor = np.floor(scaled_coords).astype(np.int32)
+    coords_frac = scaled_coords - coords_floor
+    
+    # Clip coordinates to be within the valid LUT index range [0, S-1]
+    x0, y0, z0 = np.clip(coords_floor[..., 0], 0, S - 1), np.clip(coords_floor[..., 1], 0, S - 1), np.clip(coords_floor[..., 2], 0, S - 1)
+    x1, y1, z1 = np.clip(x0 + 1, 0, S - 1), np.clip(y0 + 1, 0, S - 1), np.clip(z0 + 1, 0, S - 1)
+
+    # Get the 8 corner values from the LUT
+    c000 = lut[x0, y0, z0]
+    c001 = lut[x0, y0, z1]
+    c010 = lut[x0, y1, z0]
+    c011 = lut[x0, y1, z1]
+    c100 = lut[x1, y0, z0]
+    c101 = lut[x1, y0, z1]
+    c110 = lut[x1, y1, z0]
+    c111 = lut[x1, y1, z1]
+
+    # Expand fractional coordinates for broadcasting
+    xd, yd, zd = coords_frac[..., 0, None], coords_frac[..., 1, None], coords_frac[..., 2, None]
+
+    # Perform trilinear interpolation
+    c00 = c000 * (1 - zd) + c001 * zd
+    c01 = c010 * (1 - zd) + c011 * zd
+    c10 = c100 * (1 - zd) + c101 * zd
+    c11 = c110 * (1 - zd) + c111 * zd
+    
+    c0 = c00 * (1 - yd) + c01 * yd
+    c1 = c10 * (1 - yd) + c11 * yd
+    
+    c = c0 * (1 - xd) + c1 * xd
+    
     return c
 
 def apply_3d_lut(img_arr: np.ndarray, lut3d: np.ndarray, strength: float = 1.0) -> np.ndarray:
+    # ... (This function is correct and remains unchanged)
     if img_arr.ndim != 3 or img_arr.shape[2] != 3:
         raise ValueError("apply_3d_lut expects an HxWx3 image array")
     img_float = img_arr.astype(np.float32) / 255.0
@@ -60,6 +84,7 @@ def apply_3d_lut(img_arr: np.ndarray, lut3d: np.ndarray, strength: float = 1.0) 
         return np.clip(blended, 0, 255).astype(np.uint8)
 
 def apply_lut(img_arr: np.ndarray, lut: np.ndarray, strength: float = 1.0) -> np.ndarray:
+    # ... (This function is correct and remains unchanged)
     lut = np.array(lut)
     if lut.ndim == 4 and lut.shape[3] == 3:
         if lut.dtype != np.float32 and lut.max() > 1.0:
@@ -70,12 +95,10 @@ def apply_lut(img_arr: np.ndarray, lut: np.ndarray, strength: float = 1.0) -> np
     else:
         raise ValueError("Unsupported LUT shape: {}".format(lut.shape))
 
-# --- THE FIX IS HERE: A NEW, MORE ROBUST .CUBE PARSER ---
 def load_cube_lut(path: str) -> np.ndarray:
     """
-    A robust parser for .cube files that handles common format variations.
-    It ignores comments, blank lines, and unknown metadata, focusing only on
-    LUT_3D_SIZE and the color data itself.
+    A robust parser for .cube files that handles common format variations and
+    correctly orders the axes for lookup.
     """
     size = None
     data = []
@@ -93,14 +116,11 @@ def load_cube_lut(path: str) -> np.ndarray:
                     raise ValueError(f"Invalid LUT_3D_SIZE format in {path}: {line}")
                 continue
             
-            # This regex is more forgiving and just looks for three numbers.
-            # It will correctly grab data lines and ignore other metadata like TITLE.
             match = re.match(r'^(-?\d+(\.\d+)?(e-?\d+)?)\s+(-?\d+(\.\d+)?(e-?\d+)?)\s+(-?\d+(\.\d+)?(e-?\d+)?)$', line)
             if match:
                 try:
                     data.append([float(c) for c in line.split()])
                 except ValueError:
-                    # Ignore lines that look like data but aren't
                     print(f"Warning: Skipping malformed data line in {path}: {line}")
                     continue
 
@@ -111,22 +131,20 @@ def load_cube_lut(path: str) -> np.ndarray:
     if len(data) != expected_size:
         raise ValueError(f"Cube LUT data length does not match size^3 (got {len(data)}, expected {expected_size})")
 
+    # --- THE DEFINITIVE FIX ---
+    # Reshape and then transpose the axes to the correct [R, G, B] order for lookup.
     lut = np.array(data, dtype=np.float32).reshape((size, size, size, 3))
+    lut = np.transpose(lut, (2, 1, 0, 3))
+    # --- END FIX ---
     
-    # Ensure LUT values are normalized to [0, 1]
     if lut.max() > 1.0 + 1e-6:
+        print(f"Warning: LUT values seem to be in [0, 255] range. Normalizing to [0, 1].")
         lut = lut / 255.0
         
     return np.clip(lut, 0.0, 1.0)
 
 def load_lut(path: str) -> np.ndarray:
-    """
-    Load a LUT from:
-     - .npy (numpy saved array)
-     - .cube (3D LUT)
-     - image (PNG/JPG) that is a 1D LUT strip (common 256x1 or 1x256)
-    Returns numpy array (1D, 2D, or 4D LUT).
-    """
+    # ... (This function is correct and remains unchanged)
     ext = os.path.splitext(path)[1].lower()
     if ext == '.npy':
         return np.load(path)

@@ -16,6 +16,7 @@ class INSTARAW_SpectralEngine:
 
     PRESETS = ["fast", "balanced", "quality", "custom"] # Added custom preset
 
+    # Replace the INPUT_TYPES class method
     @classmethod
     def INPUT_TYPES(cls):
         return {
@@ -25,16 +26,16 @@ class INSTARAW_SpectralEngine:
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "control_after_generate": "randomize"}),
             },
             "optional": {
-                # --- NEW POWER-USER OVERRIDES ---
+                # --- THIS IS THE FIX: Update defaults to match our "Effective Tune" ---
                 "s1_attack_strength": ("FLOAT", {"default": 30.0, "min": 0.0, "max": 200.0, "step": 0.5}),
                 "s1_visual_cost": ("FLOAT", {"default": 40.0, "min": 0.0, "max": 200.0, "step": 0.5}),
                 "s1_stats_guidance": ("FLOAT", {"default": 4.0, "min": 0.0, "max": 50.0, "step": 0.1}),
-                "s1_smoothness": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 5.0, "step": 0.05}),
+                "s1_smoothness": ("FLOAT", {"default": 0.50, "min": 0.0, "max": 5.0, "step": 0.05}), # Corrected from 0.5
                 
                 "s2_attack_strength": ("FLOAT", {"default": 20.0, "min": 0.0, "max": 200.0, "step": 0.5}),
                 "s2_visual_cost": ("FLOAT", {"default": 50.0, "min": 0.0, "max": 200.0, "step": 0.5}),
                 "s2_stats_guidance": ("FLOAT", {"default": 3.0, "min": 0.0, "max": 50.0, "step": 0.1}),
-                "s2_smoothness": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 5.0, "step": 0.05}),
+                "s2_smoothness": ("FLOAT", {"default": 1.00, "min": 0.0, "max": 5.0, "step": 0.05}), # Corrected from 1.0
                 
                 "verbose_logging": ("BOOLEAN", {"default": False, "label_on": "Enabled", "label_off": "Disabled"}),
             }

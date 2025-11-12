@@ -77,6 +77,14 @@ from .json_utils import (
 from .detection_bypass_v2 import INSTARAW_DetectionBypass_V2 # Add this
 from .authenticity_v2 import INSTARAW_Authenticity_V2
 from .lut_selector import INSTARAW_LUT_Selector  # Add this import
+from .spectral_engine_node import (
+    NODE_CLASS_MAPPINGS as SPECTRAL_ENGINE_MAPPINGS,
+    NODE_DISPLAY_NAME_MAPPINGS as SPECTRAL_ENGINE_DISPLAY_MAPPINGS,
+)
+from .color_science_node import (
+    NODE_CLASS_MAPPINGS as COLOR_SCIENCE_MAPPINGS,
+    NODE_DISPLAY_NAME_MAPPINGS as COLOR_SCIENCE_DISPLAY_MAPPINGS,
+)
 
 
 NODE_CLASS_MAPPINGS = {
@@ -107,6 +115,8 @@ NODE_CLASS_MAPPINGS = {
     "INSTARAW_DetectionBypass_V2": INSTARAW_DetectionBypass_V2, # Add this
     "INSTARAW_Authenticity_V2": INSTARAW_Authenticity_V2,
     "INSTARAW_LUT_Selector": INSTARAW_LUT_Selector, # Add this
+    **SPECTRAL_ENGINE_MAPPINGS,
+    **COLOR_SCIENCE_MAPPINGS,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -137,6 +147,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "INSTARAW_DetectionBypass_V2": "🛡️ INSTARAW Detection Bypass V2", # Add this
     "INSTARAW_Authenticity_V2": "🛡️ INSTARAW Authenticity V2",
     "INSTARAW_LUT_Selector": "🎨 INSTARAW LUT Selector", # Add this
+    **SPECTRAL_ENGINE_DISPLAY_MAPPINGS,
+    **COLOR_SCIENCE_DISPLAY_MAPPINGS,
 }
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]

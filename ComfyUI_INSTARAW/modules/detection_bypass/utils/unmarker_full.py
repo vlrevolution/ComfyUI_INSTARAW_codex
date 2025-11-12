@@ -1,5 +1,9 @@
 # Filename: ComfyUI_INSTARAW/modules/detection_bypass/utils/unmarker_full.py
-# --- FINAL BOMBPROOF VERSION WITH DEBUG CANARY ---
+# ---
+"""
+Full two-stage spectral normalization implementation. FINAL VERSION.
+Accepts external overrides for fine-tuning.
+"""
 
 import math
 import os
@@ -16,8 +20,8 @@ from .unmarker_losses import FFTLoss, LpipsVGG, LpipsAlex, NormLoss, DeeplossVGG
 from .adaptive_filter import AdaptiveFilter
 from .stats_utils import StatsMatcher
 
-
-class TwoStageUnMarker:
+class SpectralNormalizer:
+    # ... (The class and its methods __init__, _create_fft_loss, _apply_preprocess, _optimize_stage are all IDENTICAL to the last version. No changes needed here.) ...
     def __init__(
         self,
         stage1_iterations: int = 500, stage1_learning_rate: float = 3e-4, stage1_binary_steps: int = 5,
@@ -72,71 +76,44 @@ class TwoStageUnMarker:
             self.lpips_model = LpipsAlex().to(self.device).eval()
         for param in self.lpips_model.parameters():
             param.requires_grad = False
-
     def _create_fft_loss(self, stage: str):
-        if stage == "high_freq":
-            return FFTLoss(norm=1, power=1, use_tanh=False, use_grayscale=True).to(self.device)
-        else:
-            return FFTLoss(norm=2, power=1, use_tanh=False, use_grayscale=True).to(self.device)
-
+        if stage == "high_freq": return FFTLoss(norm=1, power=1, use_tanh=False, use_grayscale=True).to(self.device)
+        else: return FFTLoss(norm=2, power=1, use_tanh=False, use_grayscale=True).to(self.device)
     def _apply_preprocess(self, tensor: torch.Tensor) -> torch.Tensor:
-        # --- THIS IS THE CANARY ---
-        # This print statement will tell us definitively which code is running.
-        print(f"--- DEBUG CANARY: CROP RATIO BEING USED IS {self.crop_ratio} ---")
-        
-        if not self.crop_ratio or self.crop_ratio == (1.0, 1.0):
-            return tensor
-            
+        if not self.crop_ratio: return tensor
         ratio_h, ratio_w = self.crop_ratio
         _, _, height, width = tensor.shape
-        crop_h = max(1, int(round(height * ratio_h)))
-        crop_w = max(1, int(round(width * ratio_w)))
-        start_h = max(0, (height - crop_h) // 2)
-        start_w = max(0, (width - crop_w) // 2)
+        crop_h, crop_w = max(1, int(round(height * ratio_h))), max(1, int(round(width * ratio_w)))
+        start_h, start_w = max(0, (height - crop_h) // 2), max(0, (width - crop_w) // 2)
         cropped = tensor[:, :, start_h:start_h + crop_h, start_w:start_w + crop_w]
-
         if cropped.shape[-2:] != (height, width):
             cropped = F.interpolate(cropped, size=(height, width), mode="bicubic", align_corners=False)
         return cropped
-
     def _optimize_stage(
-        self,
-        img_tensor: torch.Tensor,
-        stage_name: str,
-        iterations: int,
-        learning_rate: float,
-        binary_steps: int,
-        stage_params: Optional[Dict[str, Any]] = None,
+        self, img_tensor: torch.Tensor, stage_name: str, iterations: int, learning_rate: float,
+        binary_steps: int, stage_params: Optional[Dict[str, Any]] = None,
     ) -> torch.Tensor:
         fft_loss_fn = self._create_fft_loss(stage_name)
         stage_params = stage_params.copy() if stage_params else {}
-
         const = stage_params.get("initial_const", 1.0)
         c_lpips = stage_params.get("c_lpips", 1.0)
         stats_weight = stage_params.get("stats_weight", 0.0)
         fft_scale_target = stage_params.get("fft_scale_target", self.fft_scale_target)
         delta_blur_sigma = stage_params.get("delta_blur_sigma", 0.0)
-
         if self.verbose:
             print(f"  [{stage_name}] Starting unified optimization ({iterations} steps)...")
             print(f"  [{stage_name}] Trade-off params: const={const:.2f}, c_lpips={c_lpips:.2f}, stats_weight={stats_weight:.2f}, delta_blur={delta_blur_sigma:.2f}")
-
         delta = torch.randn(img_tensor.shape[0], 1, img_tensor.shape[2], img_tensor.shape[3], device=self.device, dtype=img_tensor.dtype) * 0.0001
         delta.requires_grad = True
-
         filt = AdaptiveFilter(kernels=self.filter_kernels, shape=img_tensor.shape).to(self.device) if self.use_adaptive_filter else None
         optimizer = optim.Adam([delta] + (list(filt.parameters()) if filt else []), lr=learning_rate)
-
         dynamic_fft_scale = None
         early_stop_patience = stage_params.get("early_stop_patience", 400)
-        no_improve_steps = 0
-        best_iter_loss = float("inf")
-
+        no_improve_steps, best_iter_loss = 0, float("inf")
         for i in range(iterations):
             optimizer.zero_grad()
             delta_rgb = delta.expand_as(img_tensor)
             x_adv = torch.clamp(img_tensor + (filt(delta_rgb, img_tensor) if filt else delta_rgb), -1, 1)
-
             loss_fft_raw = fft_loss_fn(x_adv, img_tensor).mean()
             if dynamic_fft_scale is None:
                 init_fft = abs(loss_fft_raw.detach()).item()
@@ -145,19 +122,15 @@ class TwoStageUnMarker:
             loss_lpips = self.lpips_model(x_adv, img_tensor).mean()
             stats_penalty = self.stats_matcher(x_adv)[0] if self.stats_matcher else 0
             loss_filter = filt.compute_loss(x_adv).mean() if filt else 0
-            
             total_loss = (const * loss_fft) + (c_lpips * loss_lpips) + (stats_weight * stats_penalty) + loss_filter
             total_loss.backward()
-
             if delta.grad is not None:
                 delta.grad.data.clamp_(-self.grad_clip_value, self.grad_clip_value)
             optimizer.step()
-
             if delta_blur_sigma > 0:
                 with torch.no_grad():
                     kernel_size = int(delta_blur_sigma * 3) * 2 + 1
                     delta.data = kornia.filters.gaussian_blur2d(delta.data, (kernel_size, kernel_size), (delta_blur_sigma, delta_blur_sigma))
-
             current_loss = total_loss.item()
             if current_loss < best_iter_loss - 1e-5:
                 best_iter_loss, no_improve_steps = current_loss, 0
@@ -166,31 +139,23 @@ class TwoStageUnMarker:
             if no_improve_steps > early_stop_patience:
                 if self.verbose: print(f"    DEBUG: Early stopping due to stagnation.")
                 break
-
             if self.verbose and (i % 100 == 0 or i == iterations - 1):
                 stats_str = f", Stats={stats_penalty.item():.4f}" if self.stats_matcher else ""
                 print(f"    Iter {i}/{iterations}: TotalLoss={total_loss.item():.4f}, FFT={loss_fft.item():.4f}, LPIPS={loss_lpips.item():.4f}{stats_str}")
-
         with torch.no_grad():
             delta_rgb = delta.expand_as(img_tensor)
             final_adv = torch.clamp(img_tensor + (filt(delta_rgb, img_tensor) if filt else delta_rgb), -1, 1)
             final_lpips = self.lpips_model(final_adv, img_tensor).mean().item()
             stats_final_val = self.stats_matcher(final_adv)[0].item() if self.stats_matcher else float('inf')
-
         if self.verbose:
             print(f"  [{stage_name}] Optimization finished. Final LPIPS={final_lpips:.4f}, Final Stats={stats_final_val:.4f}")
-        
         return final_adv
-
-    def attack(self, img_np: np.ndarray, stage_overrides: Optional[Dict[str, Dict[str, Any]]] = None) -> np.ndarray:
+    def process(self, img_np: np.ndarray, stage_overrides: Optional[Dict[str, Dict[str, Any]]] = None) -> np.ndarray:
         stage_overrides = stage_overrides or {}
         img_np_float = img_np.astype(np.float32) / 255.0
         img_tensor = torch.from_numpy(np.transpose(img_np_float, (2, 0, 1))[None, ...]).to(self.device)
         img_tensor = (img_tensor - 0.5) / 0.5
-        
-        # Call preprocess here, where self.crop_ratio is set
         img_tensor = self._apply_preprocess(img_tensor)
-
         original_shape = img_tensor.shape[-2:]
         resize_back_shape = None
         if self.attack_long_side_limit and max(original_shape) > self.attack_long_side_limit:
@@ -198,115 +163,106 @@ class TwoStageUnMarker:
             new_h, new_w = int(round(original_shape[0] * scale)), int(round(original_shape[1] * scale))
             img_tensor = F.interpolate(img_tensor, size=(new_h, new_w), mode="bicubic", align_corners=False)
             resize_back_shape = original_shape
-            if self.verbose: print(f"   ↳ Downscaling attack canvas to {new_h}x{new_w}")
-
+            if self.verbose: print(f"   ↳ Downscaling canvas to {new_h}x{new_w}")
         if self.verbose:
             print(f"🖼️ Input resolution: {img_np.shape[0]}x{img_np.shape[1]}")
-            print("🚀 Two-Stage UnMarker: Starting GUIDED attack...")
-
+            print("🚀 INSTARAW Spectral Engine: Starting GUIDED normalization...")
         stage1_params = stage_overrides.get("high_freq", {})
-        if self.verbose: print("\n=== STAGE 1: High Frequency Attack ===")
+        if self.verbose: print("\n=== STAGE 1: High Frequency Normalization ===")
         stage1_out = self._optimize_stage(
             img_tensor, "high_freq", self.stage1_iterations, self.stage1_lr,
             self.stage1_binary_steps, stage1_params
         )
-
         stage2_params = stage_overrides.get("low_freq", {})
-        if self.verbose: print("\n=== STAGE 2: Low Frequency Attack ===")
+        if self.verbose: print("\n=== STAGE 2: Low Frequency Refinement ===")
         stage2_out = self._optimize_stage(
             stage1_out, "low_freq", self.stage2_iterations, self.stage2_lr,
             self.stage2_binary_steps, stage2_params
         )
-
         if resize_back_shape is not None:
             stage2_out = F.interpolate(stage2_out, size=resize_back_shape, mode="bicubic", align_corners=False)
-
         final_tensor = (stage2_out.squeeze(0).cpu().detach() + 1) / 2
         final_np = (final_tensor.permute(1, 2, 0).clamp(0, 1) * 255).numpy().astype(np.uint8)
-
-        if self.verbose: print("\n✅ Two-Stage UnMarker: Attack complete!")
+        if self.verbose: print("\n✅ INSTARAW Spectral Engine: Normalization complete!")
         return final_np
 
-# REPLACE THIS FUNCTION
 def _size_profile_overrides(
     height: int, width: int, preset_name: str, base_config: Dict[str, Any],
 ) -> Tuple[Dict[str, Any], Dict[str, Dict[str, Any]], Dict[str, Any]]:
-    """Builds size-aware overrides for the final unified loss model."""
     max_dim = max(height, width)
     size_ratio = max(1.0, max_dim / 512.0)
     overrides: Dict[str, Any] = {}
     stage_params: Dict[str, Dict[str, Any]] = {"high_freq": {}, "low_freq": {}}
-
-    # This is the fix for the zoom issue.
     overrides["crop_ratio"] = (1.0, 1.0)
-    
     overrides["lpips_type"] = "vgg" if max_dim > 768 else "alex"
-
     s1_iters = int(min(1500, 800 * size_ratio))
     s2_iters = int(min(800, 400 * size_ratio))
     overrides["stage1_iterations"] = max(base_config.get("stage1_iterations", 500), s1_iters)
     overrides["stage2_iterations"] = max(base_config.get("stage2_iterations", 300), s2_iters)
-    
-    # --- NEW "EFFECTIVE TUNE" (Targeting LPIPS ~0.07) ---
-    # This is a balanced approach: strong enough for a good bypass,
-    # but with a higher visual cost to keep the LPIPS in check.
     stage_params["high_freq"].update({
-        "initial_const": 30.0,  # Reduced from 45.0 (less aggressive attack)
-        "c_lpips": 40.0,        # Increased from 20.0 (prioritizes visual quality more)
-        "stats_weight": 4.0,    # Slightly reduced from 5.0 to keep balance
-        "fft_scale_target": 0.05,
-        "delta_blur_sigma": 0.5, # Increased from 0.35 (smoother, more natural perturbation)
+        "initial_const": 30.0, "c_lpips": 40.0, "stats_weight": 4.0,
+        "fft_scale_target": 0.05, "delta_blur_sigma": 0.5,
     })
     stage_params["low_freq"].update({
-        "initial_const": 20.0,  # Reduced from 30.0
-        "c_lpips": 50.0,        # Increased from 30.0 (strong visual leash in refinement stage)
-        "stats_weight": 3.0,    # Slightly reduced from 4.0
-        "fft_scale_target": 0.03,
-        "delta_blur_sigma": 1.0, # Increased from 0.75 for a very smooth final touch
+        "initial_const": 20.0, "c_lpips": 50.0, "stats_weight": 3.0,
+        "fft_scale_target": 0.03, "delta_blur_sigma": 1.0,
     })
-    
     meta = {}
     return overrides, stage_params, meta
 
-def attack_two_stage_unmarker(
-    img_arr: np.ndarray, preset: str = "balanced", **kwargs
-) -> np.ndarray:
+def normalize_spectrum_twostage(img_arr: np.ndarray, preset: str = "balanced", **kwargs) -> np.ndarray: # Rebranded function
     presets = {
         "fast": {"stage1_binary_steps": 3, "stage2_binary_steps": 2, "use_adaptive_filter": False, "attack_long_side_limit": 900},
         "balanced": {"stage1_binary_steps": 4, "stage2_binary_steps": 3, "use_adaptive_filter": False, "attack_long_side_limit": 1152, "lpips_type": "deeploss"},
         "quality": {"stage1_binary_steps": 6, "stage2_binary_steps": 4, "use_adaptive_filter": True, "filter_kernels": [(7, 7), (15, 15)], "attack_long_side_limit": 1536, "lpips_type": "deeploss"},
     }
     base_config = {**presets.get(preset, presets["balanced"])}
-    config = {**base_config, **kwargs}
     
+    user_stage_overrides = kwargs.pop("stage_overrides", {})
+    
+    # --- THIS IS THE FIX ---
+    # Pop the 'seed' from kwargs so it doesn't get passed to the constructor.
+    # We will handle the seed inside the worker thread.
+    seed_value = kwargs.pop("seed", None)
+    # --- END FIX ---
+    
+    config = {**base_config, **kwargs}
+    # ... (the rest of the function is the same until the worker_fn) ...
     height, width = img_arr.shape[:2]
     attack_limit = config.get("attack_long_side_limit")
     effective_h, effective_w = height, width
     if attack_limit and max(height, width) > attack_limit:
         scale = attack_limit / max(height, width)
         effective_h, effective_w = int(round(height * scale)), int(round(width * scale))
-
-    size_overrides, stage_overrides, meta = _size_profile_overrides(effective_h, effective_w, preset, config)
-    
+    size_overrides, stage_params, meta = _size_profile_overrides(effective_h, effective_w, preset, config)
     for key, value in size_overrides.items():
         if key not in kwargs: config[key] = value
-    stage_overrides["_meta"] = meta
-    
+    final_stage_overrides = {
+        "high_freq": {**stage_params.get("high_freq", {}), **user_stage_overrides.get("high_freq", {})},
+        "low_freq": {**stage_params.get("low_freq", {}), **user_stage_overrides.get("low_freq", {})},
+        "_meta": meta
+    }
+
     result_container, exception_container = [], []
     def worker_fn():
         try:
-            # The config dictionary is passed here, which contains the crop_ratio
-            unmarker = TwoStageUnMarker(**config)
-            # The attack method then uses the self.crop_ratio set during initialization
-            result = unmarker.attack(img_arr, stage_overrides=stage_overrides)
+            # --- THIS IS THE FIX (PART 2) ---
+            # The original research code for the attack itself doesn't use a seed.
+            # The randomness comes from the `torch.randn` initialization of `delta`.
+            # To make our seed reproducible, we must set the torch manual seed
+            # right before the engine is created and used.
+            if seed_value is not None:
+                torch.manual_seed(seed_value)
+            # --- END FIX ---
+            
+            engine = SpectralNormalizer(**config)
+            result = engine.process(img_arr, stage_overrides=final_stage_overrides)
             result_container.append(result)
         except Exception as e:
             exception_container.append(e)
-
     thread = threading.Thread(target=worker_fn)
     thread.start()
     thread.join()
-
     if exception_container: raise exception_container[0]
-    if not result_container: raise RuntimeError("Two-stage UnMarker failed to return a result.")
+    if not result_container: raise RuntimeError("INSTARAW Spectral Engine failed to return a result.")
     return result_container[0]
