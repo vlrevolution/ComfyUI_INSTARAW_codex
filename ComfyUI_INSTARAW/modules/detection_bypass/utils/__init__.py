@@ -1,5 +1,4 @@
-# ---
-# Filename: ../ComfyUI_INSTARAW/modules/detection_bypass/utils/__init__.py (Updated)
+# Filename: ComfyUI_INSTARAW/modules/detection_bypass/utils/__init__.py
 # ---
 from .autowb import auto_white_balance_ref
 from .clahe import clahe_color_correction
@@ -11,22 +10,25 @@ from .perturbation import randomized_perturbation
 from .glcm_normalization import glcm_normalize
 from .lbp_normalization import lbp_normalize
 from .non_semantic_unmarker import attack_non_semantic  # Simplified UnMarker
-from .unmarker_full import attack_two_stage_unmarker, TwoStageUnMarker  # Full UnMarker
+from .unmarker_full import (
+    attack_two_stage_unmarker,
+    TwoStageUnMarker,
+)  # Full, GUIDED UnMarker
 from .blend import blend_colors
 
 __all__ = [
-    'auto_white_balance_ref',
-    'clahe_color_correction',
-    'load_lut',
-    'apply_lut',
-    'remove_exif_pil',
-    'fourier_match_spectrum',
-    'add_gaussian_noise',
-    'randomized_perturbation',
-    'glcm_normalize',
-    'lbp_normalize',
-    'attack_non_semantic',  # Simplified UnMarker (fast, 70% effectiveness)
-    'attack_two_stage_unmarker',  # Full UnMarker (slow, 95% effectiveness)
-    'TwoStageUnMarker',  # Full UnMarker class for advanced usage
-    'blend_colors',
+    "auto_white_balance_ref",
+    "clahe_color_correction",
+    "load_lut",
+    "apply_lut",
+    "remove_exif_pil",
+    "fourier_match_spectrum",
+    "add_gaussian_noise",
+    "randomized_perturbation",
+    "glcm_normalize",
+    "lbp_normalize",
+    "attack_non_semantic",
+    "attack_two_stage_unmarker",  # The main function we'll use
+    "TwoStageUnMarker",
+    "blend_colors",
 ]

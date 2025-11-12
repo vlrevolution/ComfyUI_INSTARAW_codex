@@ -1,3 +1,5 @@
+# Filename: ComfyUI_INSTARAW/modules/detection_bypass/utils/stats_utils.py
+# ---
 # Helper for matching images to reference iPhone statistics
 import numpy as np
 import torch
