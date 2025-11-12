@@ -224,6 +224,7 @@ class TwoStageUnMarker:
         if self.stats_matcher:
             with torch.no_grad():
                 stats_baseline = self.stats_matcher(img_tensor)[0].item()
+        quality_mask = self._quality_mask(img_tensor) if self.stats_matcher else None
         for binary_step in range(binary_steps):
             if self.verbose:
                 print(
