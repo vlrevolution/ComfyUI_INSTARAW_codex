@@ -218,22 +218,24 @@ def normalize_spectrum_twostage(img_arr: np.ndarray, preset: str = "balanced", *
     }
     base_config = {**presets.get(preset, presets["balanced"])}
     
-    user_stage_overrides = kwargs.pop("stage_overrides", {})
-    
     # --- THIS IS THE FIX ---
-    # Pop the 'seed' from kwargs so it doesn't get passed to the constructor.
-    # We will handle the seed inside the worker thread.
-    seed_value = kwargs.pop("seed", None)
+    # Enforce the analysis resolution for maximum effectiveness.
+    # We will override the preset's attack_long_side_limit with our known best value.
+    base_config['attack_long_side_limit'] = 1920
     # --- END FIX ---
+
+    user_stage_overrides = kwargs.pop("stage_overrides", {})
+    seed_value = kwargs.pop("seed", None)
     
     config = {**base_config, **kwargs}
-    # ... (the rest of the function is the same until the worker_fn) ...
     height, width = img_arr.shape[:2]
     attack_limit = config.get("attack_long_side_limit")
     effective_h, effective_w = height, width
     if attack_limit and max(height, width) > attack_limit:
         scale = attack_limit / max(height, width)
         effective_h, effective_w = int(round(height * scale)), int(round(width * scale))
+
+    # ... (the rest of the function is identical) ...
     size_overrides, stage_params, meta = _size_profile_overrides(effective_h, effective_w, preset, config)
     for key, value in size_overrides.items():
         if key not in kwargs: config[key] = value
@@ -242,19 +244,11 @@ def normalize_spectrum_twostage(img_arr: np.ndarray, preset: str = "balanced", *
         "low_freq": {**stage_params.get("low_freq", {}), **user_stage_overrides.get("low_freq", {})},
         "_meta": meta
     }
-
     result_container, exception_container = [], []
     def worker_fn():
         try:
-            # --- THIS IS THE FIX (PART 2) ---
-            # The original research code for the attack itself doesn't use a seed.
-            # The randomness comes from the `torch.randn` initialization of `delta`.
-            # To make our seed reproducible, we must set the torch manual seed
-            # right before the engine is created and used.
             if seed_value is not None:
                 torch.manual_seed(seed_value)
-            # --- END FIX ---
-            
             engine = SpectralNormalizer(**config)
             result = engine.process(img_arr, stage_overrides=final_stage_overrides)
             result_container.append(result)
