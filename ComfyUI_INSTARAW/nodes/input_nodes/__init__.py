@@ -1,0 +1,19 @@
+"""
+INSTARAW Input Nodes
+Nodes for loading data into the workflow.
+"""
+
+from .advanced_image_loader import (
+    NODE_CLASS_MAPPINGS as LOADER_MAPPINGS,
+    NODE_DISPLAY_NAME_MAPPINGS as LOADER_DISPLAY_MAPPINGS,
+)
+
+NODE_CLASS_MAPPINGS = {
+    **LOADER_MAPPINGS,
+}
+
+NODE_DISPLAY_NAME_MAPPINGS = {
+    **LOADER_DISPLAY_MAPPINGS,
+}
+
+__all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]

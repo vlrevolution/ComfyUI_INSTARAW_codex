@@ -1,0 +1,9 @@
+{
+  "description": "A clean, natural profile from a Sony A7IV. Good for general purpose use.",
+  "fft_profile": [0.1, 0.2, 0.3],
+  "glcm_props": {
+    "contrast": 150.5,
+    "homogeneity": 0.95
+  },
+  "lbp_hist": [0.05, 0.15, 0.8]
+}

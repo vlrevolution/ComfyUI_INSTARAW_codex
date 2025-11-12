@@ -1,0 +1,26 @@
+# ComfyUI INSTARAW Dependencies
+# Note: torch and numpy are already included with ComfyUI
+
+# API nodes
+requests
+Pillow
+
+# Mask processing (optional but recommended for GrowMaskWithBlur)
+kornia
+scipy
+tqdm
+
+google-genai~=1.43.0
+google-api-core
+
+# Performance enhancement for model downloads from Hugging Face
+huggingface_hub[hf_xet]
+
+mediapipe
+
+onnxruntime
+
+piexif
+
+scikit-image
+lpips

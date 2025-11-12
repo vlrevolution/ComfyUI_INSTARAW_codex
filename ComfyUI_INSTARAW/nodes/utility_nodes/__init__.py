@@ -1,0 +1,142 @@
+# ---
+# Filename: ../ComfyUI_INSTARAW/nodes/utility_nodes/__init__.py
+# ---
+
+"""
+INSTARAW Utility Nodes
+Helper nodes for workflow convenience
+"""
+
+from .seed_generator import (
+    NODE_CLASS_MAPPINGS as SEED_MAPPINGS,
+    NODE_DISPLAY_NAME_MAPPINGS as SEED_DISPLAY_MAPPINGS,
+)
+from .grow_mask_with_blur import (
+    NODE_CLASS_MAPPINGS as MASK_MAPPINGS,
+    NODE_DISPLAY_NAME_MAPPINGS as MASK_DISPLAY_MAPPINGS,
+)
+from .feather_mask import (
+    NODE_CLASS_MAPPINGS as FEATHER_MAPPINGS,
+    NODE_DISPLAY_NAME_MAPPINGS as FEATHER_DISPLAY_MAPPINGS,
+)
+from .image_resolution_clamp import (
+    NODE_CLASS_MAPPINGS as RESOLUTION_GUARD_MAPPINGS,
+    NODE_DISPLAY_NAME_MAPPINGS as RESOLUTION_GUARD_DISPLAY_MAPPINGS,
+)
+from .api_provider_selector import (
+    NODE_CLASS_MAPPINGS as PROVIDER_MAPPINGS,
+    NODE_DISPLAY_NAME_MAPPINGS as PROVIDER_DISPLAY_MAPPINGS,
+)
+from .realistic_noise import (
+    NODE_CLASS_MAPPINGS as NOISE_MAPPINGS,
+    NODE_DISPLAY_NAME_MAPPINGS as NOISE_DISPLAY_MAPPINGS,
+)
+from .realistic_jpeg import (
+    NODE_CLASS_MAPPINGS as JPEG_MAPPINGS,
+    NODE_DISPLAY_NAME_MAPPINGS as JPEG_DISPLAY_MAPPINGS,
+)
+from .workflow_logic_nodes import (
+    NODE_CLASS_MAPPINGS as WORKFLOW_LOGIC_MAPPINGS,
+    NODE_DISPLAY_NAME_MAPPINGS as WORKFLOW_LOGIC_DISPLAY_MAPPINGS,
+)
+from .detection_bypass import (
+    NODE_CLASS_MAPPINGS as BYPASS_MAPPINGS,
+    NODE_DISPLAY_NAME_MAPPINGS as BYPASS_DISPLAY_MAPPINGS,
+)
+
+from .list_utility_nodes import (
+    INSTARAW_BatchFromImageList,
+    INSTARAW_ImageListFromBatch,
+    INSTARAW_PickFromList,
+    INSTARAW_StringListFromStrings,
+)
+from .string_utility_nodes import (
+    INSTARAW_SplitByCommas,
+    INSTARAW_StringToFloat,
+    INSTARAW_StringToInt,
+    INSTARAW_AnyListToString,
+    INSTARAW_StringCombine,
+)
+from .mask_utility_nodes import INSTARAW_MaskedSection, INSTARAW_MaskCombine
+from .branding_node import (
+    NODE_CLASS_MAPPINGS as BRANDING_MAPPINGS,
+    NODE_DISPLAY_NAME_MAPPINGS as BRANDING_DISPLAY_MAPPINGS,
+)
+from .image_resize_advanced import (
+    NODE_CLASS_MAPPINGS as RESIZE_MAPPINGS,
+    NODE_DISPLAY_NAME_MAPPINGS as RESIZE_DISPLAY_MAPPINGS,
+)
+from .api_model_selector import (
+    NODE_CLASS_MAPPINGS as MODEL_SELECTOR_MAPPINGS,
+    NODE_DISPLAY_NAME_MAPPINGS as MODEL_SELECTOR_DISPLAY_MAPPINGS,
+)
+from .json_utils import (
+    NODE_CLASS_MAPPINGS as JSON_MAPPINGS,
+    NODE_DISPLAY_NAME_MAPPINGS as JSON_DISPLAY_MAPPINGS,
+)
+from .detection_bypass_v2 import INSTARAW_DetectionBypass_V2 # Add this
+from .authenticity_v2 import INSTARAW_Authenticity_V2
+from .lut_selector import INSTARAW_LUT_Selector  # Add this import
+
+
+NODE_CLASS_MAPPINGS = {
+    **SEED_MAPPINGS,
+    **MASK_MAPPINGS,
+    **FEATHER_MAPPINGS,
+    **RESOLUTION_GUARD_MAPPINGS,
+    **PROVIDER_MAPPINGS,
+    **NOISE_MAPPINGS,
+    **JPEG_MAPPINGS,
+    **WORKFLOW_LOGIC_MAPPINGS,
+    "INSTARAW_BatchFromImageList": INSTARAW_BatchFromImageList,
+    "INSTARAW_ImageListFromBatch": INSTARAW_ImageListFromBatch,
+    "INSTARAW_PickFromList": INSTARAW_PickFromList,
+    "INSTARAW_StringListFromStrings": INSTARAW_StringListFromStrings,
+    "INSTARAW_SplitByCommas": INSTARAW_SplitByCommas,
+    "INSTARAW_StringToFloat": INSTARAW_StringToFloat,
+    "INSTARAW_StringToInt": INSTARAW_StringToInt,
+    "INSTARAW_AnyListToString": INSTARAW_AnyListToString,
+    "INSTARAW_MaskedSection": INSTARAW_MaskedSection,
+    "INSTARAW_MaskCombine": INSTARAW_MaskCombine,
+    "INSTARAW_StringCombine": INSTARAW_StringCombine,
+    **BRANDING_MAPPINGS,
+    **RESIZE_MAPPINGS,
+    **MODEL_SELECTOR_MAPPINGS,
+    **JSON_MAPPINGS, 
+    **BYPASS_MAPPINGS, 
+    "INSTARAW_DetectionBypass_V2": INSTARAW_DetectionBypass_V2, # Add this
+    "INSTARAW_Authenticity_V2": INSTARAW_Authenticity_V2,
+    "INSTARAW_LUT_Selector": INSTARAW_LUT_Selector, # Add this
+}
+
+NODE_DISPLAY_NAME_MAPPINGS = {
+    **SEED_DISPLAY_MAPPINGS,
+    **MASK_DISPLAY_MAPPINGS,
+    **FEATHER_DISPLAY_MAPPINGS,
+    **RESOLUTION_GUARD_DISPLAY_MAPPINGS,
+    **PROVIDER_DISPLAY_MAPPINGS,
+    **NOISE_DISPLAY_MAPPINGS,
+    **JPEG_DISPLAY_MAPPINGS,
+    **WORKFLOW_LOGIC_DISPLAY_MAPPINGS,
+    "INSTARAW_BatchFromImageList": "🗃️ INSTARAW Batch From Image List",
+    "INSTARAW_ImageListFromBatch": "📑 INSTARAW Image List From Batch",
+    "INSTARAW_PickFromList": "👉 INSTARAW Pick From List",
+    "INSTARAW_StringListFromStrings": "📑 INSTARAW String List",
+    "INSTARAW_SplitByCommas": "🔪 INSTARAW Split String",
+    "INSTARAW_StringToFloat": "→FLOAT INSTARAW String To Float",
+    "INSTARAW_StringToInt": "→INT INSTARAW String To Int",
+    "INSTARAW_AnyListToString": "→STRING INSTARAW List To String",
+    "INSTARAW_MaskedSection": "🖼️ INSTARAW Masked Section",
+    "INSTARAW_MaskCombine": "➕ INSTARAW Mask Combine",
+    "INSTARAW_StringCombine": "✍️ INSTARAW String Combine (Safe)",
+    **BRANDING_DISPLAY_MAPPINGS,
+    **RESIZE_DISPLAY_MAPPINGS, 
+    **MODEL_SELECTOR_DISPLAY_MAPPINGS,
+    **JSON_DISPLAY_MAPPINGS,
+    **BYPASS_DISPLAY_MAPPINGS,
+    "INSTARAW_DetectionBypass_V2": "🛡️ INSTARAW Detection Bypass V2", # Add this
+    "INSTARAW_Authenticity_V2": "🛡️ INSTARAW Authenticity V2",
+    "INSTARAW_LUT_Selector": "🎨 INSTARAW LUT Selector", # Add this
+}
+
+__all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
