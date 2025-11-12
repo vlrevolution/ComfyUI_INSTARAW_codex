@@ -80,9 +80,9 @@ class INSTARAW_ColorScience:
 
 # --- Node Registration ---
 NODE_CLASS_MAPPINGS = {
-    "INSTARAW_ColorScience": INSTARAW_ColorScience,
+    "INSTARAW_ColorScience": INSTARAW_ColorScience
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "INSTARAW_ColorScience": "🎨 INSTARAW Color Science (LUT)",
+    "INSTARAW_ColorScience": "🎨 INSTARAW Color Science (LUT)"
 }

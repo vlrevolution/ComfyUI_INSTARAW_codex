@@ -107,5 +107,5 @@ class INSTARAW_SpectralEngine:
         return (final_batch,)
 
 # --- Node Registration ---
-NODE_CLASS_MAPPINGS = { "INSTARAW_SpectralEngine": INSTARAW_SpectralEngine, }
-NODE_DISPLAY_NAME_MAPPINGS = { "INSTARAW_SpectralEngine": "🛡️ INSTARAW Spectral Engine", }
+NODE_CLASS_MAPPINGS = { "INSTARAW_SpectralEngine": INSTARAW_SpectralEngine }
+NODE_DISPLAY_NAME_MAPPINGS = { "INSTARAW_SpectralEngine": "🛡️ INSTARAW Spectral Engine" }
