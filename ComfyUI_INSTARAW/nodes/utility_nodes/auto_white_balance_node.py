@@ -12,7 +12,8 @@ IPHONE13_REF_PATH = os.path.join(NODE_DIR, "_refs", "iphone13.jpg")
 class INSTARAW_AutoWhiteBalance:
     """
     Corrects the color cast and exposure. Features a built-in iPhone 13 reference,
-    multiple target grey levels, or can use an external reference image.
+    multiple target grey levels, or can use an external reference image. Includes a
+    strength slider to control the intensity of the correction.
     """
 
     MODES = [
@@ -35,6 +36,11 @@ class INSTARAW_AutoWhiteBalance:
             "required": {
                 "image": ("IMAGE",),
                 "mode": (cls.MODES, {"default": "iPhone 13 (Internal Ref)"}),
+                # --- NEW STRENGTH SLIDER ---
+                "strength": ("FLOAT", {
+                    "default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01,
+                    "tooltip": "Intensity of the white balance correction. 0.0 is no effect, 1.0 is full correction."
+                }),
             },
             "optional": {
                 "awb_ref_image": ("IMAGE", {
@@ -55,66 +61,68 @@ class INSTARAW_AutoWhiteBalance:
     def _numpy_to_tensor(self, np_array: np.ndarray) -> torch.Tensor:
         return torch.from_numpy(np_array.astype(np.float32) / 255.0).unsqueeze(0)
 
-    # --- REVERTED TO THE CORRECT, SIMPLER LOGIC ---
     def _auto_white_balance_ref(self, img_arr: np.ndarray, ref_img_arr: np.ndarray = None, grey_target: float = 128.0) -> np.ndarray:
-        """
-        Corrects color and luminance using a single, robust linear scaling method.
-        """
         img = img_arr.astype(np.float32)
-
         if ref_img_arr is not None:
-            # Reference mode: target the average RGB value of the reference image
             target_mean = ref_img_arr.astype(np.float32).reshape(-1, 3).mean(axis=0)
         else:
-            # Target Grey mode: target a specific shade of neutral grey
             target_mean = np.array([grey_target, grey_target, grey_target], dtype=np.float32)
-
         img_mean = img.reshape(-1, 3).mean(axis=0)
-        
-        # Avoid division by zero for black images
         if np.all(img_mean < 1e-6):
             return img_arr
-
-        # Calculate the scaling factor for each channel
         scale = target_mean / (img_mean + 1e-6)
-
-        # Apply the scaling and clip the result to the valid 0-255 range
-        corrected = np.clip(img * scale, 0, 255).astype(np.uint8)
-
+        corrected = np.clip(img * scale, 0, 255) # Keep as float for blending
         return corrected
-    # --- END REPLACEMENT ---
 
-    def execute(self, image: torch.Tensor, mode: str, awb_ref_image: torch.Tensor = None):
-        # ... (This function's logic is correct and remains the same) ...
-        print(f"🎨 INSTARAW Auto White Balance: Applying '{mode}' correction.")
+    def execute(self, image: torch.Tensor, mode: str, strength: float, awb_ref_image: torch.Tensor = None):
+        if strength == 0:
+            return (image,) # Pass through if strength is zero
+
+        if mode == "Reference Image" and awb_ref_image is None:
+            print("⚠️ INSTARAW Auto White Balance: 'Reference Image' mode selected but no reference connected. Passing through.")
+            return (image,)
+            
+        print(f"🎨 INSTARAW Auto White Balance: Applying '{mode}' correction with strength {strength:.2f}.")
+
         ref_numpy_image = None
         grey_target_value = 128.0
         if mode == "iPhone 13 (Internal Ref)":
             if not os.path.exists(IPHONE13_REF_PATH):
                 raise FileNotFoundError(f"Internal reference image not found! Expected at: {IPHONE13_REF_PATH}")
-            print(f"  - Using internal reference: {os.path.basename(IPHONE13_REF_PATH)}")
             ref_pil = Image.open(IPHONE13_REF_PATH)
             ref_numpy_image = np.array(ref_pil.convert("RGB"))
         elif mode == "Reference Image":
-            if awb_ref_image is None:
-                print("⚠️ 'Reference Image' mode selected but no reference connected. Passing through.")
-                return (image,)
             ref_numpy_image = self._tensor_to_numpy(awb_ref_image[0:1])
         else:
             grey_target_value = self.GREY_TARGETS.get(mode, 128.0)
+
         processed_images = []
         for i in range(image.shape[0]):
-            numpy_image = self._tensor_to_numpy(image[i:i+1])
-            processed_numpy_image = self._auto_white_balance_ref(
-                img_arr=numpy_image,
+            original_numpy = self._tensor_to_numpy(image[i:i+1])
+            
+            # Get the fully corrected image as a float
+            corrected_numpy_float = self._auto_white_balance_ref(
+                img_arr=original_numpy,
                 ref_img_arr=ref_numpy_image,
                 grey_target=grey_target_value
             )
-            processed_tensor = self._numpy_to_tensor(processed_numpy_image)
+
+            # --- NEW BLENDING LOGIC ---
+            # Blend the original and the corrected image based on strength
+            blended_numpy_float = (original_numpy.astype(np.float32) * (1 - strength)) + (corrected_numpy_float * strength)
+            
+            # Final clip and conversion to uint8
+            blended_numpy_uint8 = np.clip(blended_numpy_float, 0, 255).astype(np.uint8)
+            # --- END BLENDING LOGIC ---
+
+            processed_tensor = self._numpy_to_tensor(blended_numpy_uint8)
             processed_images.append(processed_tensor)
+
         if not processed_images:
             return (image,)
+            
         final_batch = torch.cat(processed_images, dim=0)
+        
         print("✅ INSTARAW Auto White Balance: Processing complete.")
         return (final_batch,)
 

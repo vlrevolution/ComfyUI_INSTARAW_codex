@@ -8,7 +8,7 @@ from PIL import Image
 # We will use the camera simulation utility, but only for specific effects
 from ...modules.detection_bypass.camera_pipeline import simulate_camera_pipeline
 
-class INSTARAW_LensSimulation:
+class INSTARAW_LensEffects:
     """
     Simulates the subtle, physical imperfections of a real camera lens, such as
     vignetting and chromatic aberration. This should be applied late in the
@@ -48,26 +48,31 @@ class INSTARAW_LensSimulation:
         if vignette_strength == 0 and chromatic_aberration == 0:
             return (image,)
 
-        print(f"렌즈 INSTARAW Lens Simulation: Applying effects.")
+        print(f"👁️ INSTARAW Lens Effects: Applying effects.")
 
         processed_images = []
         for i in range(image.shape[0]):
             numpy_image = self.tensor_to_numpy(image[i:i+1])
 
-            # Call the camera pipeline simulator, but only enable the effects we want.
-            # All other effects (noise, jpeg, etc.) are disabled by default or set to zero.
+            # --- THIS IS THE FIX ---
+            # Set iso_scale to 1.0 to prevent the image from turning black.
+            # All other unused effects are correctly disabled with 0 or False.
             processed_numpy_image = simulate_camera_pipeline(
                 img_arr=numpy_image,
                 vignette_strength=vignette_strength,
                 chroma_aberr_strength=chromatic_aberration,
                 seed=seed + i,
-                # Explicitly disable other effects to be safe
+                
+                # Neutral / passthrough values for unused effects
                 bayer=False,
                 jpeg_cycles=0,
-                iso_scale=0,
+                iso_scale=1.0, # <-- THE FIX IS HERE
                 read_noise_std=0,
                 hot_pixel_prob=0,
+                banding_strength=0.0,
+                motion_blur_kernel=1
             )
+            # --- END FIX ---
 
             processed_tensor = self.numpy_to_tensor(processed_numpy_image)
             processed_images.append(processed_tensor)
@@ -77,14 +82,14 @@ class INSTARAW_LensSimulation:
             
         final_batch = torch.cat(processed_images, dim=0)
         
-        print("✅ INSTARAW Lens Simulation: Processing complete.")
+        print("✅ INSTARAW Lens Effects: Processing complete.")
         return (final_batch,)
 
 # --- Node Registration ---
 NODE_CLASS_MAPPINGS = {
-    "INSTARAW_LensSimulation": INSTARAW_LensSimulation,
+    "INSTARAW_LensEffects": INSTARAW_LensEffects,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "INSTARAW_LensSimulation": "렌즈 INSTARAW Lens Simulation",
+    "INSTARAW_LensEffects": "👁️ INSTARAW Lens Effects",
 }
