@@ -103,6 +103,7 @@ from .texture_engine import NODE_CLASS_MAPPINGS as TEXTURE_ENGINE_MAPPINGS, NODE
 from .spectral_normalizer_node import INSTARAW_Spectral_Normalizer
 from .pixel_perturb import INSTARAW_Pixel_Perturb
 from .blend_colors import INSTARAW_BlendColors
+from .camera_simulator import INSTARAW_Camera_Simulator
 
 # --- CLEANED UP MAPPINGS ---
 NODE_CLASS_MAPPINGS = {
@@ -145,6 +146,7 @@ NODE_CLASS_MAPPINGS = {
     "INSTARAW_Spectral_Normalizer": INSTARAW_Spectral_Normalizer,
     "INSTARAW_Pixel_Perturb": INSTARAW_Pixel_Perturb,
     "INSTARAW_BlendColors": INSTARAW_BlendColors,
+    "INSTARAW_Camera_Simulator": INSTARAW_Camera_Simulator,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -187,6 +189,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "INSTARAW_Spectral_Normalizer": "🛡️ INSTARAW Spectral Normalizer",
     "INSTARAW_Pixel_Perturb": "🛡️ INSTARAW Pixel Perturb",
     "INSTARAW_BlendColors": "🛡️ INSTARAW Blend Colors",
+    "INSTARAW_Camera_Simulator": "🛡️ INSTARAW Camera Simulator",
 }
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
