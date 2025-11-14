@@ -24,3 +24,5 @@ piexif
 
 scikit-image
 lpips
+
+pyexiftool

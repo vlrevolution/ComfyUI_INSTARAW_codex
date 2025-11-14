@@ -1,180 +1,139 @@
-# ---
-# Filename: ../ComfyUI_INSTARAW/nodes/utility_nodes/save_with_metadata.py
-# ---
-
-# ---
-# ComfyUI INSTARAW - Save With Authentic Metadata Node
-# Part of the INSTARAW custom nodes collection by Instara
-#
-# Copyright © 2025 Instara. All rights reserved.
-# PROPRIETARY SOFTWARE - ALL RIGHTS RESERVED
-# ---
-
+# Filename: ComfyUI_INSTARAW/nodes/output_nodes/save_with_metadata.py
 import torch
 import numpy as np
 from PIL import Image
-import piexif
 import os
-import re
 import json
 import random
-from datetime import datetime, timedelta
 import folder_paths
+import tempfile
+import shutil
+import uuid
+import subprocess
+import sys
 
-class INSTARAW_SaveWithMetadata:
-    """
-    A node that saves an image while stripping all ComfyUI metadata and injecting
-    a realistic EXIF profile mimicking a modern iPhone, including GPS data and authentic filenames.
-    """
-    
-    OUTPUT_NODE = True
-    CATEGORY = "INSTARAW/Output"
+def is_tool(name):
+    return shutil.which(name) is not None
+
+EXIFTOOL_AVAILABLE = is_tool("exiftool") or is_tool("exiftool.exe")
+
+class INSTARAW_SaveWithAuthenticMetadata:
+    OUTPUT_NODE = False 
+    CATEGORY = "INSTARAW/Authenticity"
     FUNCTION = "save_image"
-
-    LOCATIONS = {
-        "None": None,
-        "New York, NY": (40.712776, -74.005974),
-        "Los Angeles, CA": (34.052235, -118.243683),
-        "Miami, FL": (25.761681, -80.191788),
-        "Chicago, IL": (41.878113, -87.629799),
-        "Las Vegas, NV": (36.169941, -115.139832),
-        "Austin, TX": (30.267153, -97.743061),
-        "San Francisco, CA": (37.774929, -122.419418),
-        "Nashville, TN": (36.162663, -86.781601),
-        "Atlanta, GA": (33.748997, -84.387985),
-        "Honolulu, HI": (21.306944, -157.858337),
-        "London, UK": (51.507351, -0.127758),
-        "Tokyo, JP": (35.689487, 139.691711),
-    }
 
     @classmethod
     def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "image": ("IMAGE",),
-                "use_iphone_naming": ("BOOLEAN", {"default": True, "label_on": "Authentic iPhone Filename", "label_off": "Use Prefix"}),
-                "filename_prefix": ("STRING", {"default": "INSTARAW_Image"}),
-                "format": (["jpg", "png"], {"default": "jpg"}),
-                "quality": ("INT", {"default": 95, "min": 1, "max": 100}),
-                "iphone_model": (["iPhone 16 Pro", "iPhone 16 Pro Max", "iPhone 15 Pro"], {"default": "iPhone 16 Pro"}),
-                "ios_version": ("STRING", {"default": "19.1"}),
-                "location": (list(cls.LOCATIONS.keys()), {"default": "New York, NY"}),
-                "randomize_details": ("BOOLEAN", {"default": True, "label_on": "Randomize Time/ISO/Shutter", "label_off": "Use Fixed Values"}),
-            },
-            "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},
-        }
+        return { "required": { "image": ("IMAGE",), "filename_prefix": ("STRING", {"default": "INSTARAW_Authentic"}), }, "optional": { "profile_path": ("STRING", {"forceInput": True}), } }
 
-    RETURN_TYPES = ()
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("filepath",)
 
-    def _get_next_iphone_filenumber(self, output_dir):
-        """Scans the output directory to find the next available IMG_XXXX number."""
-        pattern = re.compile(r"IMG_(\d{4})\.(jpg|jpeg|png|heic)", re.IGNORECASE)
-        highest_num = 0
-        for f in os.listdir(output_dir):
-            match = pattern.match(f)
-            if match:
-                num = int(match.group(1))
-                if num > highest_num:
-                    highest_num = num
-        return highest_num + 1
+    def save_image(self, image: torch.Tensor, filename_prefix: str, profile_path=None):
+        if not EXIFTOOL_AVAILABLE:
+            raise Exception("ExifTool is not installed or not in your system's PATH. Please install it from https://exiftool.org/.")
 
-    def _gps_to_exif(self, latitude, longitude):
-        # ... (this function remains unchanged)
-        def to_deg(value, loc):
-            if value < 0: loc_value = loc[1]
-            elif value > 0: loc_value = loc[0]
-            else: loc_value = ""
-            abs_value = abs(value)
-            deg = int(abs_value)
-            t1 = (abs_value - deg) * 60
-            min = int(t1)
-            sec = round((t1 - min) * 60, 5)
-            return (deg, min, sec, loc_value)
-        lat_deg = to_deg(latitude, ("N", "S"))
-        lng_deg = to_deg(longitude, ("E", "W"))
-        return {
-            piexif.GPSIFD.GPSLatitudeRef: lat_deg[3],
-            piexif.GPSIFD.GPSLatitude: ((lat_deg[0], 1), (lat_deg[1], 1), (int(lat_deg[2] * 100000), 100000)),
-            piexif.GPSIFD.GPSLongitudeRef: lng_deg[3],
-            piexif.GPSIFD.GPSLongitude: ((lng_deg[0], 1), (lng_deg[1], 1), (int(lng_deg[2] * 100000), 100000)),
-        }
+        if image.shape[0] > 1:
+            print("⚠️ INSTARAW Save: Input batch contains more than one image. Only the first will be processed.")
 
-    def save_image(self, image: torch.Tensor, use_iphone_naming: bool, filename_prefix: str, format: str, quality: int,
-                   iphone_model: str, ios_version: str, location: str, randomize_details: bool,
-                   prompt=None, extra_pnginfo=None):
+        img_tensor = image[0:1]
+        img_np = img_tensor.squeeze(0).cpu().numpy()
+        img_pil = Image.fromarray((img_np * 255).astype(np.uint8), 'RGB')
 
         output_dir = folder_paths.get_output_directory()
+        full_output_folder, filename, counter, subfolder, _ = folder_paths.get_save_image_path(filename_prefix, output_dir, img_pil.width, img_pil.height)
         
-        # --- THIS IS THE NEW LOGIC ---
-        start_number = 0
-        if use_iphone_naming:
-            start_number = self._get_next_iphone_filenumber(output_dir)
+        selected_profile = None
+        json_path = None
+        if profile_path and profile_path.strip():
+            json_path = f"{profile_path}.json" if not profile_path.endswith('.json') else profile_path
+            if os.path.exists(json_path):
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    metadata_library = json.load(f)
+                if metadata_library:
+                    selected_profile = random.choice(metadata_library)
         
-        saved_files = []
-        # --- END NEW LOGIC ---
+        temp_dir = tempfile.gettempdir()
+        temp_filepath = os.path.join(temp_dir, f"instaraw_img_{uuid.uuid4()}.jpg")
+        img_pil.save(temp_filepath, quality=95, format='JPEG')
+        
+        arg_filepath = None
+        final_filepath = ""
+        try:
+            if selected_profile:
+                print("\n" + "="*25 + " INSTARAW Save Log " + "="*25)
 
-        for i in range(image.shape[0]):
-            img_tensor = image[i:i+1]
-            img_np = img_tensor.squeeze(0).cpu().numpy()
-            img_pil = Image.fromarray((img_np * 255).astype(np.uint8), 'RGB')
-            width, height = img_pil.size
+                icc_profile_key = "_instaraw_icc_profile_file"
+                has_icc_profile = icc_profile_key in selected_profile
+                
+                # --- DEFINITIVE LOGGING LOGIC ---
+                tags_to_write = {k: v for k, v in selected_profile.items() if not k.startswith(('File:', 'Composite:', 'JFIF:', '_instaraw'))}
+                total_profile_keys = len(selected_profile)
+                writable_count = len(tags_to_write)
+                icc_count = 1 if has_icc_profile else 0
+                skipped_count = total_profile_keys - writable_count - icc_count
+                
+                log_message = f"Injecting metadata: {writable_count} writable tags, {skipped_count} skipped (read-only/derived), {icc_count} ICC Profile..."
+                print(log_message)
+                # --- END LOGGING LOGIC ---
 
-            # --- Filename Generation ---
-            if use_iphone_naming:
-                current_num = start_number + i
-                filename = f"IMG_{current_num:04d}" # :04d pads with leading zeros, e.g., 9 -> 0009
-            else:
-                filename = f"{filename_prefix}_{i:03d}"
+                print("--- PROFILE TO INJECT ---")
+                print(json.dumps(selected_profile, indent=2, ensure_ascii=False))
+                print("="*70)
+
+                exiftool_cmd = shutil.which("exiftool") or shutil.which("exiftool.exe")
+                command = [exiftool_cmd]
+                
+                icc_profile_path = None
+                if has_icc_profile:
+                    icc_filename = selected_profile.pop(icc_profile_key) # Use pop on the original dict
+                    if json_path:
+                        profile_dir = os.path.dirname(json_path)
+                        full_icc_path = os.path.join(profile_dir, icc_filename)
+                        if os.path.exists(full_icc_path):
+                            icc_profile_path = full_icc_path
+                            print(f"   - Found ICC Profile to inject: {full_icc_path}")
+                        else:
+                            print(f"   - ⚠️ WARNING: ICC Profile file not found at {full_icc_path}")
+                
+                with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', suffix=".txt", delete=False) as arg_file:
+                    arg_filepath = arg_file.name
+                    for key, value in tags_to_write.items():
+                        arg_file.write(f"-{key}={value}\n")
+                
+                command.extend(["-@", arg_filepath])
+
+                if icc_profile_path:
+                    command.append(f"-ICC_Profile<={icc_profile_path}")
+
+                command.extend([
+                    "-overwrite_original",
+                    "-ignoreMinorErrors",
+                    temp_filepath
+                ])
+                
+                print(f"   - Executing ExifTool command...")
+                result = subprocess.run(command, capture_output=True, text=True, check=False, encoding='utf-8', errors='ignore')
+
+                if result.returncode != 0:
+                    print(f"❌ INSTARAW Save: ExifTool process failed. Stderr: {result.stderr.strip()}")
+                elif "1 image files updated" not in result.stdout:
+                     print(f"⚠️ INSTARAW Save: ExifTool ran but may not have updated the file. Full output:")
+                     print(f"   - Stdout: {result.stdout.strip()}")
+                     print(f"   - Stderr: {result.stderr.strip()}")
+                else:
+                    print(f"   - ExifTool Success: {result.stdout.strip()}")
+
+            file = f"{filename}_{counter:05}_.jpg"
+            final_filepath = os.path.join(full_output_folder, file)
+            shutil.move(temp_filepath, final_filepath)
             
-            filepath = os.path.join(output_dir, f"{filename}.{format}")
-            # --- End Filename Generation ---
+        finally:
+            if os.path.exists(temp_filepath): os.remove(temp_filepath)
+            if arg_filepath and os.path.exists(arg_filepath): os.remove(arg_filepath)
 
-            now = datetime.now() - timedelta(days=random.randint(1, 30))
-            if randomize_details:
-                now -= timedelta(seconds=random.randint(0, 3600))
-                iso = random.randint(50, 200)
-                shutter_speed_denom = random.choice([60, 100, 120, 250, 500])
-                f_stop = random.choice([1.8, 2.0, 2.2, 2.8])
-            else:
-                iso, shutter_speed_denom, f_stop = 80, 120, 1.8
-            date_str = now.strftime("%Y:%m:%d %H:%M:%S")
+        results = [{"filename": os.path.basename(final_filepath), "subfolder": subfolder, "type": "output"}]
+        return {"ui": {"images": results}, "result": (final_filepath,)}
 
-            exif_dict = {"0th": {}, "Exif": {}, "GPS": {}, "1st": {}, "thumbnail": None}
-            exif_dict["0th"][piexif.ImageIFD.Make] = b"Apple"
-            exif_dict["0th"][piexif.ImageIFD.Model] = iphone_model.encode('utf-8')
-            exif_dict["0th"][piexif.ImageIFD.Software] = ios_version.encode('utf-8')
-            exif_dict["0th"][piexif.ImageIFD.DateTime] = date_str.encode('utf-8')
-            exif_dict["0th"][piexif.ImageIFD.XResolution] = (72, 1)
-            exif_dict["0th"][piexif.ImageIFD.YResolution] = (72, 1)
-            exif_dict["0th"][piexif.ImageIFD.ResolutionUnit] = 2
-            exif_dict["Exif"][piexif.ExifIFD.DateTimeOriginal] = date_str.encode('utf-8')
-            exif_dict["Exif"][piexif.ExifIFD.DateTimeDigitized] = date_str.encode('utf-8')
-            exif_dict["Exif"][piexif.ExifIFD.PixelXDimension] = width
-            exif_dict["Exif"][piexif.ExifIFD.PixelYDimension] = height
-            exif_dict["Exif"][piexif.ExifIFD.ISOSpeedRatings] = iso
-            exif_dict["Exif"][piexif.ExifIFD.ExposureTime] = (1, shutter_speed_denom)
-            exif_dict["Exif"][piexif.ExifIFD.FNumber] = (int(f_stop * 100), 100)
-            exif_dict["Exif"][piexif.ExifIFD.LensModel] = b"iPhone 16 Pro Camera"
-            exif_dict["Exif"][piexif.ExifIFD.FocalLength] = (240, 10)
-            exif_dict["Exif"][piexif.ExifIFD.ColorSpace] = 1
-            if self.LOCATIONS[location] is not None:
-                lat, lon = self.LOCATIONS[location]
-                exif_dict["GPS"] = self._gps_to_exif(lat, lon)
-            exif_bytes = piexif.dump(exif_dict)
-            
-            if format == 'jpg':
-                img_pil.save(filepath, quality=quality, exif=exif_bytes)
-            elif format == 'png':
-                img_pil.save(filepath)
-            
-            saved_files.append({"filename": f"{filename}.{format}", "subfolder": "", "type": "output"})
-
-        return {"ui": {"images": saved_files}}
-
-NODE_CLASS_MAPPINGS = {
-    "INSTARAW_SaveWithMetadata": INSTARAW_SaveWithMetadata,
-}
-
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "INSTARAW_SaveWithMetadata": "💾 INSTARAW Save w/ Metadata",
-}
+NODE_CLASS_MAPPINGS = { "INSTARAW_SaveWithAuthenticMetadata": INSTARAW_SaveWithAuthenticMetadata }
+NODE_DISPLAY_NAME_MAPPINGS = { "INSTARAW_SaveWithAuthenticMetadata": "💾 INSTARAW Save With Authentic Metadata" }

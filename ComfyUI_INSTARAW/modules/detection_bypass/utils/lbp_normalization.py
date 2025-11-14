@@ -1,105 +1,84 @@
+# Filename: ComfyUI_INSTARAW/modules/detection_bypass/utils/lbp_normalization.py
 import numpy as np
 from skimage.feature import local_binary_pattern
 from PIL import Image
+import os
 
 def lbp_normalize(img_arr: np.ndarray,
                   ref_img_arr: np.ndarray = None,
+                  profile_path: str = None, # NEW: Added profile_path
                   radius: int = 3,
                   n_points: int = 24,
                   method: str = 'uniform',
                   strength: float = 0.9,
                   seed: int = None,
                   eps: float = 1e-8):
-    """
-    Optimized LBP histogram normalization.
-
-    Key optimizations:
-    - compute LBP and its histogram once (not per channel)
-    - use np.bincount (faster) instead of np.histogram for integer LBP
-    - compute mapping & per-bin operations once, then apply vectorized indexing
-    - generate noise once for all channels
-    - fewer temporaries, consistent dtypes
-    """
-    if seed is not None:
-        rng = np.random.default_rng(seed)
-    else:
-        rng = np.random.default_rng()
+    
+    if seed is not None: rng = np.random.default_rng(seed)
+    else: rng = np.random.default_rng()
 
     img = np.asarray(img_arr)
-    h, w = img.shape[:2]
-    n_bins = n_points + 2 if method == 'uniform' else 2 ** n_points
-
-    # Grayscale conversion (float32)
-    img_gray = np.mean(img.astype(np.float32), axis=2) if img.ndim == 3 else img.astype(np.float32)
-
-    # Compute LBP for input (float or int result)
+    h, w, channels = img.shape
+    
+    img_gray = np.mean(img.astype(np.float32), axis=2)
+    
     lbp_img = local_binary_pattern(img_gray, n_points, radius, method=method)
-    # Convert LBP to integer indices for bincount (safe cast)
-    lbp_int = np.rint(lbp_img).astype(np.int32)
-    # Use bincount for integer labels which is faster than histogram
-    lbp_counts = np.bincount(lbp_int.ravel(), minlength=n_bins).astype(np.float64)
-    lbp_hist = lbp_counts / (lbp_counts.sum() + eps)
+    n_bins = int(lbp_img.max() + 1)
+    lbp_hist, _ = np.histogram(lbp_img.ravel(), bins=n_bins, range=(0, n_bins), density=True)
 
     ref_lbp_hist = None
-    if ref_img_arr is not None:
+    
+    # --- NEW LOGIC: PRIORITIZE PROFILE ---
+    if profile_path and profile_path.strip():
+        npz_path = f"{profile_path}.npz"
+        if os.path.exists(npz_path):
+            stats = np.load(npz_path)
+            if 'lbp_hist' in stats:
+                # Load the average LBP histogram from the profile
+                avg_hist = stats['lbp_hist'].mean(axis=0)
+                # Match the bin count of the source image's LBP
+                if len(avg_hist) > n_bins:
+                    ref_lbp_hist = avg_hist[:n_bins]
+                else:
+                    ref_lbp_hist = np.pad(avg_hist, (0, n_bins - len(avg_hist)), 'constant')
+                ref_lbp_hist /= (ref_lbp_hist.sum() + eps) # Re-normalize
+
+    # Fallback to live reference image
+    if ref_lbp_hist is None and ref_img_arr is not None:
         ref = np.asarray(ref_img_arr)
-        # Resize reference only once if needed
         if ref.shape[0] != h or ref.shape[1] != w:
-            ref_img = Image.fromarray(ref).resize((w, h), resample=Image.BICUBIC)
-            ref = np.array(ref_img)
-        ref_gray = np.mean(ref.astype(np.float32), axis=2) if ref.ndim == 3 else ref.astype(np.float32)
+            ref = np.array(Image.fromarray(ref).resize((w, h), resample=Image.Resampling.BICUBIC))
+        
+        ref_gray = np.mean(ref.astype(np.float32), axis=2)
         ref_lbp = local_binary_pattern(ref_gray, n_points, radius, method=method)
-        ref_int = np.rint(ref_lbp).astype(np.int32)
-        ref_counts = np.bincount(ref_int.ravel(), minlength=n_bins).astype(np.float64)
-        ref_lbp_hist = ref_counts / (ref_counts.sum() + eps)
+        ref_lbp_hist, _ = np.histogram(ref_lbp.ravel(), bins=n_bins, range=(0, n_bins), density=True)
+    # --- END NEW LOGIC ---
+
+    if ref_lbp_hist is None:
+        return img_arr
 
     out = np.empty_like(img, dtype=np.float32)
-    channels = img.shape[2] if img.ndim == 3 else 1
+    
+    cdf_img = np.cumsum(lbp_hist)
+    cdf_ref = np.cumsum(ref_lbp_hist)
+    
+    mapping = np.zeros(n_bins, dtype=np.float32)
+    for i in range(n_bins):
+        # Find the value in reference cdf that is closest to the source cdf value
+        j = np.searchsorted(cdf_ref, cdf_img[i], side='left')
+        mapping[i] = j
+    
+    lbp_int = np.rint(lbp_img).astype(np.int32)
+    mapping_per_pixel = mapping[lbp_int]
+    scale_per_pixel = mapping_per_pixel / (lbp_int.astype(np.float32) + eps)
+    
+    noise_all = rng.normal(loc=0.0, scale=0.02 * strength, size=(h, w, channels)).astype(np.float32) * 255.0
 
-    # Precompute mapping and scale-image-level arrays only once
-    if ref_lbp_hist is not None:
-        cdf_img = np.cumsum(lbp_hist)
-        cdf_ref = np.cumsum(ref_lbp_hist)
-        # Vectorized mapping: for each possible lbp bin value find target bin
-        mapping = np.searchsorted(cdf_ref, cdf_img, side='left')
-        mapping = np.clip(mapping, 0, n_bins - 1).astype(np.float32)
-        # mapping_per_pixel (h,w)
-        mapping_per_pixel = mapping[lbp_int]
-        # denom per pixel (avoid divide by zero)
-        denom = (lbp_int.astype(np.float32) + eps)
-        # precompute scale per pixel
-        scale_per_pixel = mapping_per_pixel / denom
-    else:
-        # Unused but create placeholders to keep code simpler
-        scale_per_pixel = None
+    for c in range(channels):
+        channel = img[:, :, c].astype(np.float32)
+        adjusted = channel * scale_per_pixel
+        blended = (1.0 - strength) * channel + strength * adjusted
+        blended += noise_all[:, :, c]
+        out[:, :, c] = blended
 
-    # Prepare noise for all channels at once (if needed)
-    if strength > 0.0:
-        noise_all = rng.normal(loc=0.0, scale=0.02 * strength, size=(h, w, channels)).astype(np.float32) * 255.0
-    else:
-        noise_all = np.zeros((h, w, channels), dtype=np.float32)
-
-    # Process channels: mostly vectorized
-    if channels == 1:
-        channel = img.astype(np.float32)
-        if scale_per_pixel is not None:
-            adjusted = channel * scale_per_pixel
-            blended = (1.0 - strength) * channel + strength * adjusted
-        else:
-            blended = channel
-        blended += noise_all[:, :, 0]
-        out[:, :] = blended
-    else:
-        for c in range(channels):
-            channel = img[:, :, c].astype(np.float32)
-            if scale_per_pixel is not None:
-                # vectorized multiply
-                adjusted = channel * scale_per_pixel
-                blended = (1.0 - strength) * channel + strength * adjusted
-            else:
-                blended = channel
-            blended += noise_all[:, :, c]
-            out[:, :, c] = blended
-
-    out = np.clip(out, 0, 255).astype(np.uint8)
-    return out
+    return np.clip(out, 0, 255).astype(np.uint8)

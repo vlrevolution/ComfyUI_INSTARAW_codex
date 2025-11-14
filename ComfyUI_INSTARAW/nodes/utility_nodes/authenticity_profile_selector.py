@@ -1,22 +1,22 @@
 # Filename: ComfyUI_INSTARAW/nodes/utility_nodes/authenticity_profile_selector.py
 import os
 
-# Locate the root of the custom node package to find the profiles directory
-NODE_FILE_PATH = os.path.dirname(os.path.realpath(__file__))
-INSTARAW_ROOT_PATH = os.path.abspath(os.path.join(NODE_FILE_PATH, "..", ".."))
-PROFILES_DIR = os.path.join(INSTARAW_ROOT_PATH, "modules", "authenticity_profiles")
-
 class INSTARAW_AuthenticityProfile_Selector:
     """
     Dynamically finds and lists all .npz authenticity profiles from the internal
-    'modules/authenticity_profiles' directory. Outputs the full path to the selected profile.
+    'modules/authenticity_profiles' directory. Outputs the base path to the selected profile.
     """
     
+    NODE_FILE_PATH = os.path.dirname(os.path.realpath(__file__))
+    INSTARAW_ROOT_PATH = os.path.abspath(os.path.join(NODE_FILE_PATH, "..", ".."))
+    PROFILES_DIR = os.path.join(INSTARAW_ROOT_PATH, "modules", "authenticity_profiles")
+
     PROFILE_FILES = []
     if os.path.isdir(PROFILES_DIR):
         for f in os.listdir(PROFILES_DIR):
             if f.lower().endswith('.npz'):
-                PROFILE_FILES.append(f)
+                # FIX: Store only the base name (without extension) for the dropdown
+                PROFILE_FILES.append(os.path.splitext(f)[0])
     PROFILE_FILES.sort()
 
     @classmethod
@@ -40,13 +40,16 @@ class INSTARAW_AuthenticityProfile_Selector:
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("profile_path",)
     FUNCTION = "get_path"
-    CATEGORY = "INSTARAW/Utils"
+    CATEGORY = "INSTARAW/Authenticity"
 
     def get_path(self, profile_name):
-        full_path = os.path.join(self.PROFILES_DIR, profile_name)
+        # FIX: Return the base path without the extension.
+        # The consuming nodes (FFT_Match, SaveWithMetadata, etc.) will append the correct extension.
+        base_path = os.path.join(self.PROFILES_DIR, profile_name)
         
-        if not os.path.exists(full_path):
-            raise FileNotFoundError(f"Selected authenticity profile could not be found: {full_path}")
+        # We check for the .npz file's existence here to be safe.
+        if not os.path.exists(f"{base_path}.npz"):
+            raise FileNotFoundError(f"Selected authenticity profile .npz file could not be found: {base_path}.npz")
             
-        print(f"✅ INSTARAW Profile Selector: Providing path for '{profile_name}'")
-        return (full_path,)
+        print(f"👑 INSTARAW Profile Selector: Selected profile base '{profile_name}'")
+        return (base_path,)

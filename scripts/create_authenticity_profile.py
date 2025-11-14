@@ -1,4 +1,6 @@
 # Filename: ComfyUI_INSTARAW/scripts/create_authenticity_profile.py
+# (Definitive Version 7.0 - Correct ExifTool Output Handling)
+
 import numpy as np
 from PIL import Image
 import os
@@ -8,111 +10,87 @@ import argparse
 import json
 import io
 from skimage.feature import graycomatrix, graycoprops, local_binary_pattern
-import piexif
+import subprocess
+import shutil
 
-FFT_BINS = 512
+try:
+    import exiftool
+    PYEXIFTOOL_AVAILABLE = True
+except ImportError:
+    PYEXIFTOOL_AVAILABLE = False
 
-def clean_and_translate_exif(raw_exif_bytes):
+try:
+    import pillow_heif
+    pillow_heif.register_heif_opener()
+    HEIF_SUPPORT = True
+except ImportError:
+    HEIF_SUPPORT = False
+
+FFT_BINS = 256
+
+METADATA_BLACKLIST = [
+    'SourceFile', 'File:FileName', 'File:Directory', 'File:FileModifyDate',
+    'File:FileAccessDate', 'File:FileInodeChangeDate', 'File:FileSize',
+    'File:FilePermissions', 'ExifTool:ExifToolVersion',
+]
+
+def get_metadata_with_exiftool(filepath: str) -> dict:
     """
-    Loads raw EXIF bytes, translates integer tags to human-readable names,
-    and cleans values for JSON serialization.
+    Extracts metadata, preserving group prefixes, and filters out
+    blacklisted and ICC profile tags (which are handled separately).
     """
-    if not raw_exif_bytes:
-        return {}
-
+    clean_metadata = {}
     try:
-        exif_data = piexif.load(raw_exif_bytes)
+        with exiftool.ExifToolHelper() as et:
+            raw_meta_list = et.get_metadata(filepath)
+            if not raw_meta_list:
+                return {}
+            
+            raw_metadata = raw_meta_list[0]
+            for key, value in raw_metadata.items():
+                if key not in METADATA_BLACKLIST and not key.startswith('ICC_Profile:'):
+                    clean_metadata[key] = value
     except Exception as e:
-        print(f"  - Warning: piexif failed to load EXIF data: {e}")
-        return {}
-        
-    translated_data = {}
-
-    for ifd_name in exif_data:
-        if ifd_name == "thumbnail":
-            continue
-        
-        translated_ifd = {}
-        # piexif.TAGS is the master dictionary for all IFD sections
-        tag_map = piexif.TAGS.get(ifd_name, {})
-
-        for tag_id, value in exif_data[ifd_name].items():
-            # Get the human-readable tag name
-            tag_info = tag_map.get(tag_id)
-            tag_name = tag_info['name'] if tag_info else f"UnknownTag_{tag_id}"
-
-            # Clean the value for JSON
-            if isinstance(value, bytes):
-                try:
-                    cleaned_value = value.decode('utf-8', errors='ignore').strip('\x00').strip()
-                except:
-                    cleaned_value = repr(value)
-            elif isinstance(value, tuple) and len(value) > 0 and all(isinstance(v, int) for v in value):
-                 # Handle rational numbers like (1, 125) -> "1/125"
-                 if len(value) == 2 and value[1] != 0:
-                     cleaned_value = f"{value[0]}/{value[1]}"
-                 else:
-                     cleaned_value = list(value)
-            elif isinstance(value, (int, float, str, bool, list)) or value is None:
-                cleaned_value = value
-            else:
-                cleaned_value = repr(value)
-
-            translated_ifd[tag_name] = cleaned_value
-        
-        translated_data[ifd_name] = translated_ifd
-
-    return translated_data
+        tqdm.write(f"  - WARNING: pyexiftool failed for '{os.path.basename(filepath)}'. Error: {e}")
+    return clean_metadata
 
 def radial_profile(mag: np.ndarray, bins: int):
-    """Computes a robust radial profile of a 2D array."""
     h, w = mag.shape
     cy, cx = h // 2, w // 2
     y, x = np.indices((h, w))
     r = np.sqrt((x - cx)**2 + (y - cy)**2).astype(np.int32)
-    max_r = min(r.max(), bins - 1)
-    valid_mask = r.ravel() <= max_r
-    tbin = np.bincount(r.ravel()[valid_mask], mag.ravel()[valid_mask], minlength=bins)
-    nr = np.bincount(r.ravel()[valid_mask], minlength=bins)
-    radial_mean = np.zeros(bins, dtype=np.float64)
-    valid_bins = nr > 0
-    radial_mean[valid_bins] = tbin[valid_bins] / nr[valid_bins]
-    last_valid_val = 0
-    for i in range(bins):
-        if radial_mean[i] > 0:
-            last_valid_val = radial_mean[i]
-        elif last_valid_val > 0:
-            radial_mean[i] = last_valid_val
-    return radial_mean
+    tbin = np.bincount(r.ravel(), mag.ravel())
+    nr = np.bincount(r.ravel())
+    radial_mean = tbin / (nr + 1e-9)
+    if len(radial_mean) < bins:
+        radial_mean = np.pad(radial_mean, (0, bins - len(radial_mean)), 'edge')
+    return radial_mean[:bins]
 
-def analyze_image(filepath: str) -> dict | None:
-    """Analyzes a single image (JPG, PNG) and extracts stats and metadata."""
+def analyze_image(filepath: str, analysis_resolution: int) -> dict | None:
     try:
+        metadata = get_metadata_with_exiftool(filepath)
+        
         with Image.open(filepath) as img:
-            # --- 1. Metadata Extraction ---
-            # Get the raw EXIF data block before any conversions
-            raw_exif_bytes = img.info.get('exif')
-            exif_data = clean_and_translate_exif(raw_exif_bytes)
+            img_for_spectral = img.copy()
+            if analysis_resolution > 0:
+                img_for_spectral.thumbnail((analysis_resolution, analysis_resolution), Image.Resampling.LANCZOS)
             
-            # --- 2. Statistical Analysis (on a JPG version) ---
-            # Convert to RGB and save to an in-memory JPG buffer to simulate the final format
+            img_arr_resized = np.array(img_for_spectral.convert("RGB"))
+            img_float_resized = img_arr_resized.astype(np.float32)
+            
+            spectra_channels = []
+            for i in range(3):
+                channel = img_float_resized[:, :, i]
+                fft = np.fft.fftshift(np.fft.fft2(channel))
+                mag = np.log1p(np.abs(fft))
+                spectrum = radial_profile(mag, bins=FFT_BINS)
+                spectra_channels.append(gaussian_filter1d(spectrum, sigma=2))
+
             buffer = io.BytesIO()
-            img.convert("RGB").save(buffer, format="JPEG", quality=95, exif=raw_exif_bytes or b"")
+            img.convert("RGB").save(buffer, format="JPEG", quality=95)
             buffer.seek(0)
             
             with Image.open(buffer) as jpg_img:
-                jpg_img.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
-                img_arr = np.array(jpg_img)
-                img_float = img_arr.astype(np.float32)
-                
-                spectra_channels = []
-                for i in range(3):
-                    channel = img_float[:, :, i]
-                    fft = np.fft.fftshift(np.fft.fft2(channel))
-                    mag = np.log1p(np.abs(fft))
-                    spectrum = radial_profile(mag, bins=FFT_BINS)
-                    spectra_channels.append(gaussian_filter1d(spectrum, sigma=2))
-                
                 gray_u8 = np.array(jpg_img.convert("L"))
                 glcm = graycomatrix(gray_u8, distances=[5], angles=[0], levels=256, symmetric=True, normed=True)
                 contrast = graycoprops(glcm, 'contrast')[0, 0]
@@ -131,27 +109,78 @@ def analyze_image(filepath: str) -> dict | None:
                     "glcm_props": np.array([contrast, homogeneity]),
                     "lbp_hist": lbp_hist,
                 },
-                "metadata": exif_data
+                "metadata": metadata
             }
     except Exception as e:
-        print(f"Skipping {os.path.basename(filepath)} due to error: {e}")
+        tqdm.write(f"Skipping {os.path.basename(filepath)} due to error: {e}")
         return None
 
 def main():
-    parser = argparse.ArgumentParser(description="Create a comprehensive authenticity profile from a directory of real photos.")
-    parser.add_argument("--image-dir", required=True, type=str, help="Directory containing photos to analyze (JPG, PNG, HEIC, etc.).")
-    parser.add_argument("--output-path", required=True, type=str, help="Base path for profile files (e.g., 'profiles/iPhone14').")
+    parser = argparse.ArgumentParser(description="Create a unified authenticity profile from a directory of real photos.")
+    parser.add_argument("--image-dir", required=True, type=str, help="Directory containing photos to analyze.")
+    parser.add_argument("--output-path", required=True, type=str, help="Base path for profile files (e.g., 'profiles/iPhone15_Pro').")
+    parser.add_argument("--analysis-resolution", type=int, default=1920, help="Resize images to this max dimension for spectral analysis. 0 for full-res (slow).")
     args = parser.parse_args()
-    
-    # We no longer need the pre-conversion step, so we read from the source directory
-    image_files = [os.path.join(args.image_dir, f) for f in os.listdir(args.image_dir) if not f.startswith('.')]
-    
-    all_results = [res for f in tqdm(image_files, desc=f"Analyzing Photos for '{os.path.basename(args.output_path)}'") if (res := analyze_image(f))]
-    
-    if not all_results:
-        exit(f"Error: Analysis failed for all images in {args.image_dir}.")
 
-    # Aggregate and Save Statistical Data (.npz)
+    if not PYEXIFTOOL_AVAILABLE:
+        exit("ERROR: The 'pyexiftool' library is required. Please run 'pip install pyexiftool'.")
+    
+    if args.analysis_resolution > 0: print(f"⚡ Performance Mode: Analyzing spectra at max {args.analysis_resolution}px resolution.")
+    else: print("⚠️ Quality Mode: Analyzing spectra at full resolution. This will be very slow.")
+    
+    supported_exts = ['.jpg', '.jpeg', '.png', '.webp']
+    if HEIF_SUPPORT: 
+        supported_exts.extend(['.heic', '.heif'])
+        print("✅ HEIC/HEIF support is enabled.")
+    else:
+        print("⚠️ HEIC/HEIF support is disabled. Install 'pillow-heif' to enable.")
+
+    image_files = [os.path.join(args.image_dir, f) for f in os.listdir(args.image_dir) if not f.startswith('.') and os.path.splitext(f)[1].lower() in supported_exts]
+    
+    if not image_files:
+        exit(f"Error: No supported images found in {args.image_dir}.")
+
+    # --- DEFINITIVE ICC PROFILE EXTRACTION LOGIC ---
+    icc_filename_to_embed = None
+    icc_output_path = f"{args.output_path}.icc"
+    exiftool_path = shutil.which("exiftool") or shutil.which("exiftool.exe")
+    
+    if exiftool_path:
+        print("\nSearching for an ICC Color Profile in the image set...")
+        
+        for image_to_check in image_files:
+            try:
+                # Command to print the binary ICC profile to standard output
+                command = [exiftool_path, "-icc_profile", "-b", image_to_check]
+                
+                # Run the command and capture the output
+                result = subprocess.run(command, capture_output=True, check=True)
+                
+                # If stdout has content, we found a profile
+                if result.stdout:
+                    os.makedirs(os.path.dirname(icc_output_path), exist_ok=True)
+                    # Write the captured binary data to our target file
+                    with open(icc_output_path, 'wb') as f:
+                        f.write(result.stdout)
+                    
+                    icc_filename_to_embed = os.path.basename(icc_output_path)
+                    print(f"✅ Successfully extracted ICC Profile from '{os.path.basename(image_to_check)}'.")
+                    print(f"   Saved to: {icc_output_path}")
+                    break # Stop searching once we find one
+            except (subprocess.CalledProcessError, Exception):
+                # This file didn't have a profile or failed, just try the next one silently
+                continue
+        
+        if not icc_filename_to_embed:
+            print("   - No ICC Profile found in any of the analyzed images. Skipping.")
+            
+    else:
+        print("\n⚠️ WARNING: 'exiftool' command not found. Cannot extract ICC Profile.")
+    # --- END DEFINITIVE LOGIC ---
+
+    all_results = [res for f in tqdm(image_files, desc=f"Analyzing Photos for '{os.path.basename(args.output_path)}'") if (res := analyze_image(f, args.analysis_resolution))]
+    if not all_results: exit(f"Error: Analysis failed for all supported images in {args.image_dir}.")
+
     all_stats = [r['stats'] for r in all_results]
     aggregated_stats = {
         "spectra_r": np.array([s["spectra_r"] for s in all_stats]),
@@ -167,17 +196,25 @@ def main():
     os.makedirs(os.path.dirname(npz_path), exist_ok=True)
     np.savez_compressed(npz_path, **aggregated_stats)
 
-    # Aggregate and Save Metadata Library (.json)
-    metadata_library = [r['metadata'] for r in all_results]
+    metadata_library = []
+    for r in all_results:
+        if r['metadata']:
+            meta_dict = r['metadata']
+            if icc_filename_to_embed:
+                meta_dict["_instaraw_icc_profile_file"] = icc_filename_to_embed
+            metadata_library.append(meta_dict)
+
     json_path = f"{args.output_path}.json"
     with open(json_path, 'w', encoding='utf-8') as f:
         json.dump(metadata_library, f, indent=2, ensure_ascii=False)
 
-    print("\n" + "="*50)
-    print(f"✅ Success! Profile created with {len(all_results)} images.")
-    print(f"   - Statistical data saved to: {npz_path}")
-    print(f"   - Metadata library saved to: {json_path}")
-    print("="*50)
+    print("\n" + "="*60)
+    print(f"✅ Success! Profile created from {len(all_results)} images.")
+    print(f"   - Statistical Data (.npz): {npz_path}")
+    print(f"   - Metadata Library (.json): {json_path}")
+    if icc_filename_to_embed:
+        print(f"   - ICC Color Profile (.icc): {icc_output_path}")
+    print("="*60)
 
 if __name__ == "__main__":
     main()
