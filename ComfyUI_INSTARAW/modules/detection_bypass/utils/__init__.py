@@ -12,6 +12,7 @@ from .lbp_normalization import lbp_normalize
 from .non_semantic_unmarker import attack_non_semantic  # Simplified UnMarker
 from .unmarker_full import normalize_spectrum_twostage, SpectralNormalizer
 from .blend import blend_colors
+from .direct_spectral_matching import direct_spectral_match
 
 __all__ = [
     "auto_white_balance_ref",
@@ -28,4 +29,5 @@ __all__ = [
     'normalize_spectrum_twostage',
     'SpectralNormalizer',
     "blend_colors",
+    'direct_spectral_match',
 ]

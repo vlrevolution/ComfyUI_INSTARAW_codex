@@ -6,52 +6,43 @@ from PIL import Image
 import os
 from tqdm import tqdm
 from scipy.ndimage import gaussian_filter1d
-from skimage.feature import graycomatrix, graycoprops
 import argparse
 
 FFT_BINS = 256
-GLCM_DISTANCES = [1, 2, 4]
-GLCM_ANGLES = [0, np.pi/4, np.pi/2, 3*np.pi/4]
 
 def radial_profile(mag: np.ndarray, bins: int):
     h, w = mag.shape
     cy, cx = h // 2, w // 2
     y, x = np.indices((h, w))
-    r = np.sqrt((x - cx)**2 + (y - cy)**2)
-    rmax = np.sqrt(cx**2 + cy**2)
-    if rmax == 0: return np.zeros(bins, dtype=np.float64)
-    r /= rmax
-    bin_edges = np.linspace(0.0, 1.0, bins + 1)
-    sums, _ = np.histogram(r, bins=bin_edges, weights=mag)
-    counts, _ = np.histogram(r, bins=bin_edges)
-    radial_mean = np.zeros_like(sums, dtype=np.float64)
-    nonzero = counts > 0
-    radial_mean[nonzero] = sums[nonzero] / counts[nonzero]
-    return radial_mean
+    r = np.sqrt((x - cx)**2 + (y - cy)**2).astype(np.int32)
+    tbin = np.bincount(r.ravel(), mag.ravel())
+    nr = np.bincount(r.ravel())
+    radial_mean = tbin / (nr + 1e-9)
+    if len(radial_mean) < bins:
+        radial_mean = np.pad(radial_mean, (0, bins - len(radial_mean)), 'edge')
+    return radial_mean[:bins]
 
 def analyze_image(filepath: str) -> dict | None:
     try:
         with Image.open(filepath) as img:
             img_arr = np.array(img.convert("RGB"))
-        pixels = img_arr.astype(np.float32).reshape(-1, 3)
-        chroma_mean = pixels.mean(axis=0)
-        centered = pixels - chroma_mean
-        chroma_cov = np.cov(centered, rowvar=False) # This is a 3x3 matrix
-        gray_arr = np.mean(img_arr.astype(np.float32), axis=2)
-        fft = np.fft.fftshift(np.fft.fft2(gray_arr))
-        mag = np.log1p(np.abs(fft))
-        spectrum = radial_profile(mag, bins=FFT_BINS)
-        spectrum_smooth = gaussian_filter1d(spectrum, sigma=5)
-        gray_quantized = (gray_arr / 256 * 32).astype(np.uint8)
-        glcm = graycomatrix(gray_quantized, distances=GLCM_DISTANCES, angles=GLCM_ANGLES, levels=32, symmetric=True, normed=True)
-        contrast = graycoprops(glcm, 'contrast').mean()
-        homogeneity = graycoprops(glcm, 'homogeneity').mean()
-        glcm_features = np.array([contrast, homogeneity]) 
+
+        img_float = img_arr.astype(np.float32)
+        
+        # --- NEW: Analyze each channel separately ---
+        spectra_channels = []
+        for i in range(3): # R, G, B
+            channel = img_float[:, :, i]
+            fft = np.fft.fftshift(np.fft.fft2(channel))
+            mag = np.log1p(np.abs(fft))
+            spectrum = radial_profile(mag, bins=FFT_BINS)
+            spectrum_smooth = gaussian_filter1d(spectrum, sigma=2)
+            spectra_channels.append(spectrum_smooth)
+        
         return {
-            "spectrum": spectrum_smooth,
-            "chroma_mean": chroma_mean,
-            "chroma_cov": chroma_cov, # --- THE FIX: Do NOT flatten the 3x3 matrix ---
-            "glcm": glcm_features
+            "spectra_r": spectra_channels[0],
+            "spectra_g": spectra_channels[1],
+            "spectra_b": spectra_channels[2],
         }
     except Exception as e:
         print(f"Skipping {os.path.basename(filepath)} due to error: {e}")
@@ -59,41 +50,32 @@ def analyze_image(filepath: str) -> dict | None:
 
 def main():
     parser = argparse.ArgumentParser(description="Compute reference statistics from real photos.")
-    parser.add_argument("--image-dir", required=True, type=str, help="Path to the directory of images to analyze.")
-    parser.add_argument("--output-path", required=True, type=str, help="Path to save the final .npz stats file.")
+    parser.add_argument("--image-dir", required=True, type=str)
+    parser.add_argument("--output-path", required=True, type=str)
     args = parser.parse_args()
-    if not os.path.isdir(args.image_dir):
-        print(f"Error: Provided image directory does not exist: {args.image_dir}")
-        exit(1)
+    
+    # ... (rest of main function is mostly the same, just handles new keys) ...
     image_files = [os.path.join(args.image_dir, f) for f in os.listdir(args.image_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
-    if not image_files:
-        print(f"Error: No images found in '{args.image_dir}'.")
-        exit(1)
-    print(f"Found {len(image_files)} images. Starting analysis...")
     all_stats = []
     for f in tqdm(image_files, desc="Analyzing Photos"):
         stats = analyze_image(f)
-        if stats:
-            all_stats.append(stats)
-    if not all_stats:
-        print("Error: Analysis failed for all images.")
-        exit(1)
-    print(f"\nSuccessfully analyzed {len(all_stats)} images.")
-    aggregated_spectra = np.array([s["spectrum"] for s in all_stats])
-    aggregated_chroma_means = np.array([s["chroma_mean"] for s in all_stats])
-    aggregated_chroma_covs = np.array([s["chroma_cov"] for s in all_stats])
-    aggregated_glcms = np.array([s["glcm"] for s in all_stats])
+        if stats: all_stats.append(stats)
+    
+    if not all_stats: exit("Error: Analysis failed for all images.")
+
+    # Aggregate stats for each channel
+    aggregated_spectra_r = np.array([s["spectra_r"] for s in all_stats])
+    aggregated_spectra_g = np.array([s["spectra_g"] for s in all_stats])
+    aggregated_spectra_b = np.array([s["spectra_b"] for s in all_stats])
+
     os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
     np.savez_compressed(
         args.output_path,
-        spectra=aggregated_spectra,
-        chroma_mean=aggregated_chroma_means,
-        chroma_cov=aggregated_chroma_covs,
-        glcm=aggregated_glcms
+        spectra_r=aggregated_spectra_r,
+        spectra_g=aggregated_spectra_g,
+        spectra_b=aggregated_spectra_b,
     )
-    print(f"\n✅ Success! New statistical fingerprint saved to:")
-    print(f"   {args.output_path}")
-    print("\nRestart ComfyUI for the Spectral Engine to use the new data.")
+    print(f"\n✅ Success! New multi-channel fingerprint saved to: {args.output_path}")
 
 if __name__ == "__main__":
     main()

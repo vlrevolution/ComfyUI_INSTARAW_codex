@@ -95,6 +95,7 @@ from .compression_node import (
     NODE_CLASS_MAPPINGS as COMPRESSION_MAPPINGS,
     NODE_DISPLAY_NAME_MAPPINGS as COMPRESSION_DISPLAY_MAPPINGS,
 )
+from .authenticity_profile_selector import INSTARAW_AuthenticityProfile_Selector
 
 
 # --- CLEANED UP MAPPINGS ---
@@ -129,6 +130,7 @@ NODE_CLASS_MAPPINGS = {
     **NEURAL_GRAIN_MAPPINGS,
     **LENS_EFFECTS_MAPPINGS,
     **COMPRESSION_MAPPINGS,
+    "INSTARAW_AuthenticityProfile_Selector": INSTARAW_AuthenticityProfile_Selector,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -162,6 +164,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     **NEURAL_GRAIN_DISPLAY_MAPPINGS,
     **LENS_EFFECTS_DISPLAY_MAPPINGS,
     **COMPRESSION_DISPLAY_MAPPINGS,
+    "INSTARAW_AuthenticityProfile_Selector": "👑 INSTARAW Authenticity Profile",
 }
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
