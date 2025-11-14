@@ -1,5 +1,5 @@
 # Filename: ComfyUI_INSTARAW/scripts/create_authenticity_profile.py
-# (Definitive Version 8.0 - Now includes Chroma Mean for AWB)
+# (Definitive Version 7.0 - Correct ExifTool Output Handling)
 
 import numpy as np
 from PIL import Image
@@ -26,7 +26,7 @@ try:
 except ImportError:
     HEIF_SUPPORT = False
 
-FFT_BINS = 256 # Your script uses 256, we will respect that.
+FFT_BINS = 256
 
 METADATA_BLACKLIST = [
     'SourceFile', 'File:FileName', 'File:Directory', 'File:FileModifyDate',
@@ -77,11 +77,6 @@ def analyze_image(filepath: str, analysis_resolution: int) -> dict | None:
             
             img_arr_resized = np.array(img_for_spectral.convert("RGB"))
             img_float_resized = img_arr_resized.astype(np.float32)
-
-            # --- NEW: CHROMA MEAN CALCULATION ---
-            # We calculate this on the resized image to match the spectral analysis resolution
-            chroma_mean = img_float_resized.reshape(-1, 3).mean(axis=0)
-            # --- END NEW ---
             
             spectra_channels = []
             for i in range(3):
@@ -113,7 +108,6 @@ def analyze_image(filepath: str, analysis_resolution: int) -> dict | None:
                     "spectra_b": spectra_channels[2],
                     "glcm_props": np.array([contrast, homogeneity]),
                     "lbp_hist": lbp_hist,
-                    "chroma_mean": chroma_mean, # Add the new data point to the dictionary
                 },
                 "metadata": metadata
             }
@@ -146,25 +140,43 @@ def main():
     if not image_files:
         exit(f"Error: No supported images found in {args.image_dir}.")
 
-    icc_filename_to_embed, icc_output_path = None, f"{args.output_path}.icc"
+    # --- DEFINITIVE ICC PROFILE EXTRACTION LOGIC ---
+    icc_filename_to_embed = None
+    icc_output_path = f"{args.output_path}.icc"
     exiftool_path = shutil.which("exiftool") or shutil.which("exiftool.exe")
     
     if exiftool_path:
         print("\nSearching for an ICC Color Profile in the image set...")
+        
         for image_to_check in image_files:
             try:
-                result = subprocess.run([exiftool_path, "-icc_profile", "-b", image_to_check], capture_output=True, check=True)
+                # Command to print the binary ICC profile to standard output
+                command = [exiftool_path, "-icc_profile", "-b", image_to_check]
+                
+                # Run the command and capture the output
+                result = subprocess.run(command, capture_output=True, check=True)
+                
+                # If stdout has content, we found a profile
                 if result.stdout:
                     os.makedirs(os.path.dirname(icc_output_path), exist_ok=True)
-                    with open(icc_output_path, 'wb') as f: f.write(result.stdout)
+                    # Write the captured binary data to our target file
+                    with open(icc_output_path, 'wb') as f:
+                        f.write(result.stdout)
+                    
                     icc_filename_to_embed = os.path.basename(icc_output_path)
-                    print(f"✅ Successfully extracted ICC Profile from '{os.path.basename(image_to_check)}'. Saved to: {icc_output_path}")
-                    break
+                    print(f"✅ Successfully extracted ICC Profile from '{os.path.basename(image_to_check)}'.")
+                    print(f"   Saved to: {icc_output_path}")
+                    break # Stop searching once we find one
             except (subprocess.CalledProcessError, Exception):
+                # This file didn't have a profile or failed, just try the next one silently
                 continue
-        if not icc_filename_to_embed: print("   - No ICC Profile found in any of the analyzed images. Skipping.")
+        
+        if not icc_filename_to_embed:
+            print("   - No ICC Profile found in any of the analyzed images. Skipping.")
+            
     else:
         print("\n⚠️ WARNING: 'exiftool' command not found. Cannot extract ICC Profile.")
+    # --- END DEFINITIVE LOGIC ---
 
     all_results = [res for f in tqdm(image_files, desc=f"Analyzing Photos for '{os.path.basename(args.output_path)}'") if (res := analyze_image(f, args.analysis_resolution))]
     if not all_results: exit(f"Error: Analysis failed for all supported images in {args.image_dir}.")
@@ -175,7 +187,6 @@ def main():
         "spectra_g": np.array([s["spectra_g"] for s in all_stats]),
         "spectra_b": np.array([s["spectra_b"] for s in all_stats]),
         "glcm_props": np.array([s["glcm_props"] for s in all_stats]),
-        "chroma_mean": np.array([s["chroma_mean"] for s in all_stats]), # Add the new data for saving
     }
     max_lbp_len = max(len(s["lbp_hist"]) for s in all_stats)
     padded_lbp_hists = [np.pad(s["lbp_hist"], (0, max_lbp_len - len(s["lbp_hist"])), 'constant') for s in all_stats]

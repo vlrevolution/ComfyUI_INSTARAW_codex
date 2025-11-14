@@ -78,10 +78,7 @@ from .color_science_node import (
     NODE_CLASS_MAPPINGS as COLOR_SCIENCE_MAPPINGS,
     NODE_DISPLAY_NAME_MAPPINGS as COLOR_SCIENCE_DISPLAY_MAPPINGS,
 )
-from .auto_white_balance_node import (
-    NODE_CLASS_MAPPINGS as AWB_MAPPINGS,
-    NODE_DISPLAY_NAME_MAPPINGS as AWB_DISPLAY_MAPPINGS,
-)
+from .auto_white_balance_node import INSTARAW_AutoWhiteBalance
 from .neural_grain_node import (
     NODE_CLASS_MAPPINGS as NEURAL_GRAIN_MAPPINGS,
     NODE_DISPLAY_NAME_MAPPINGS as NEURAL_GRAIN_DISPLAY_MAPPINGS,
@@ -104,6 +101,7 @@ from .spectral_normalizer_node import INSTARAW_Spectral_Normalizer
 from .pixel_perturb import INSTARAW_Pixel_Perturb
 from .blend_colors import INSTARAW_BlendColors
 from .camera_simulator import INSTARAW_Camera_Simulator
+
 
 # --- CLEANED UP MAPPINGS ---
 NODE_CLASS_MAPPINGS = {
@@ -133,7 +131,7 @@ NODE_CLASS_MAPPINGS = {
     "INSTARAW_LUT_Selector": INSTARAW_LUT_Selector,
     **SPECTRAL_ENGINE_MAPPINGS,
     **COLOR_SCIENCE_MAPPINGS,
-    **AWB_MAPPINGS,
+    "INSTARAW_AutoWhiteBalance": INSTARAW_AutoWhiteBalance,
     **NEURAL_GRAIN_MAPPINGS,
     **LENS_EFFECTS_MAPPINGS,
     **COMPRESSION_MAPPINGS,
@@ -176,7 +174,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "INSTARAW_LUT_Selector": "🎨 INSTARAW LUT Selector",
     **SPECTRAL_ENGINE_DISPLAY_MAPPINGS,
     **COLOR_SCIENCE_DISPLAY_MAPPINGS,
-    **AWB_DISPLAY_MAPPINGS,
+    "INSTARAW_AutoWhiteBalance": "🎨 INSTARAW Auto White Balance",
     **NEURAL_GRAIN_DISPLAY_MAPPINGS,
     **LENS_EFFECTS_DISPLAY_MAPPINGS,
     **COMPRESSION_DISPLAY_MAPPINGS,
