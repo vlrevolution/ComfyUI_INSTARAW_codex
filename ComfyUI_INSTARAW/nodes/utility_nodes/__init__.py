@@ -101,6 +101,7 @@ from .spectral_normalizer_node import INSTARAW_Spectral_Normalizer
 from .pixel_perturb import INSTARAW_Pixel_Perturb
 from .blend_colors import INSTARAW_BlendColors
 from .camera_simulator import INSTARAW_Camera_Simulator
+from .load_image_from_path import NODE_CLASS_MAPPINGS as LOADER_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS as LOADER_DISPLAY_MAPPINGS
 
 
 # --- CLEANED UP MAPPINGS ---
@@ -145,6 +146,7 @@ NODE_CLASS_MAPPINGS = {
     "INSTARAW_Pixel_Perturb": INSTARAW_Pixel_Perturb,
     "INSTARAW_BlendColors": INSTARAW_BlendColors,
     "INSTARAW_Camera_Simulator": INSTARAW_Camera_Simulator,
+    **LOADER_MAPPINGS,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -188,6 +190,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "INSTARAW_Pixel_Perturb": "🛡️ INSTARAW Pixel Perturb",
     "INSTARAW_BlendColors": "🛡️ INSTARAW Blend Colors",
     "INSTARAW_Camera_Simulator": "🛡️ INSTARAW Camera Simulator",
+    **LOADER_DISPLAY_MAPPINGS,
 }
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
