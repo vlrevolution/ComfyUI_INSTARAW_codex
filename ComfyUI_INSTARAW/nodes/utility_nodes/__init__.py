@@ -102,6 +102,9 @@ from .pixel_perturb import INSTARAW_Pixel_Perturb
 from .blend_colors import INSTARAW_BlendColors
 from .camera_simulator import INSTARAW_Camera_Simulator
 from .load_image_from_path import NODE_CLASS_MAPPINGS as LOADER_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS as LOADER_DISPLAY_MAPPINGS
+from .line_splitter import INSTARAW_LineSplitter
+from .image_prompt_iterator import INSTARAW_ImagePromptIterator
+from .debug_prompt_overlay import INSTARAW_DebugPromptOverlay
 
 
 # --- CLEANED UP MAPPINGS ---
@@ -147,6 +150,9 @@ NODE_CLASS_MAPPINGS = {
     "INSTARAW_BlendColors": INSTARAW_BlendColors,
     "INSTARAW_Camera_Simulator": INSTARAW_Camera_Simulator,
     **LOADER_MAPPINGS,
+    "INSTARAW_LineSplitter": INSTARAW_LineSplitter,
+    "INSTARAW_ImagePromptIterator": INSTARAW_ImagePromptIterator,
+    "INSTARAW_DebugPromptOverlay": INSTARAW_DebugPromptOverlay,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -191,6 +197,9 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "INSTARAW_BlendColors": "🛡️ INSTARAW Blend Colors",
     "INSTARAW_Camera_Simulator": "🛡️ INSTARAW Camera Simulator",
     **LOADER_DISPLAY_MAPPINGS,
+    "INSTARAW_LineSplitter": "✂️ INSTARAW Line Splitter",
+    "INSTARAW_ImagePromptIterator": "🧪 INSTARAW Image Prompt Iterator",
+    "INSTARAW_DebugPromptOverlay": "🐛 INSTARAW Debug Prompt Overlay",
 }
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
