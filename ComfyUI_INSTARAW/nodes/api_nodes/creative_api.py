@@ -256,7 +256,8 @@ async def _generate_creative_prompts(request):
         "character_reference": "",
         "model": "gemini-2.5-pro",
         "gemini_api_key": "",
-        "grok_api_key": ""
+        "grok_api_key": "",
+        "force_regenerate": false
     }
 
     Returns:
@@ -281,12 +282,13 @@ async def _generate_creative_prompts(request):
         top_p = float(data.get("top_p", 0.9))
         temperature = max(0.0, min(2.0, temperature))
         top_p = max(0.0, min(1.0, top_p))
+        force_regenerate = bool(data.get("force_regenerate", False))
 
         # Build prompts
         system_prompt = custom_system_prompt or build_system_prompt(is_sdxl, character_reference)
         user_prompt = build_user_prompt(source_prompts, generation_count, inspiration_count)
 
-        # Check cache
+        # Check cache (skip if force_regenerate is True)
         cache_key = hashlib.sha256(
             f"{system_prompt}_{user_prompt}_{model}_{temperature}_{top_p}".encode("utf-8")
         ).hexdigest()
@@ -294,11 +296,14 @@ async def _generate_creative_prompts(request):
         os.makedirs(cache_dir, exist_ok=True)
         cache_file = os.path.join(cache_dir, f"{cache_key}_creative.json")
 
-        if os.path.exists(cache_file):
+        if not force_regenerate and os.path.exists(cache_file):
             print(f"[RPG Creative API] Using cached result: {cache_key[:8]}")
             with open(cache_file, 'r', encoding='utf-8') as f:
                 prompts = json.load(f)
                 return web.json_response({"success": True, "prompts": prompts})
+
+        if force_regenerate:
+            print(f"[RPG Creative API] Force regenerate enabled - bypassing cache for {cache_key[:8]}")
 
         # Generate with appropriate API
         if model.startswith("gemini"):

@@ -77,8 +77,6 @@ app.registerExtension({
 				// Pagination state
 				let currentPage = 0;
 				const itemsPerPage = 6;
-				let reorderModeEnabled = false;
-				let sdxlModeEnabled = false;
 
 				// Container setup (exact AIL pattern)
 				const container = document.createElement("div");
@@ -488,32 +486,6 @@ app.registerExtension({
 								</div>
 							</div>
 
-							<div class="instaraw-rpg-library-header">
-								<div style="display: flex; align-items: center; gap: 12px;">
-									<span class="instaraw-rpg-result-count">
-										${filteredPrompts.length} prompt${filteredPrompts.length === 1 ? '' : 's'} found
-										${filters.show_bookmarked ? ' (favorites only)' : ''}
-										${totalPages > 1 ? ` • Page ${currentPage + 1} of ${totalPages}` : ''}
-									</span>
-									<label class="instaraw-rpg-sdxl-toggle" title="SDXL mode - show tags as main content">
-										<input type="checkbox" class="instaraw-rpg-sdxl-mode-checkbox" ${filters.sdxl_mode ? "checked" : ""} />
-										🎨 SDXL
-									</label>
-								</div>
-							</div>
-
-							${
-								totalPages > 1
-									? `
-								<div class="instaraw-rpg-pagination instaraw-rpg-pagination-top">
-									<button class="instaraw-rpg-btn-secondary instaraw-rpg-prev-page-btn" ${currentPage === 0 ? "disabled" : ""}>← Prev</button>
-									<span class="instaraw-rpg-page-info">Page ${currentPage + 1} / ${totalPages}</span>
-									<button class="instaraw-rpg-btn-secondary instaraw-rpg-next-page-btn" ${currentPage >= totalPages - 1 ? "disabled" : ""}>Next →</button>
-								</div>
-								`
-									: ""
-							}
-
 							<div class="instaraw-rpg-library-grid">
 								${
 									pagePrompts.length === 0
@@ -521,7 +493,7 @@ app.registerExtension({
 										: pagePrompts
 												.map(
 													(prompt) => {
-														const batchCount = promptQueue.filter(p => p.source_id === prompt.id).length;
+														const isInBatch = batchSourceIds.has(prompt.id);
 														const positive = prompt.prompt?.positive || "";
 														const negative = prompt.prompt?.negative || "";
 
@@ -543,44 +515,23 @@ app.registerExtension({
 																? `[No positive prompt] ${negative}`
 																: "[Empty prompt]";
 
-														const searchQuery = filters.search_query?.trim() || "";
-														const sdxlMode = filters.sdxl_mode || false;
-														const matchType = prompt._matchType;
-														const matchBadge = matchType === 'both' ? '📝🏷️' : matchType === 'prompt' ? '📝' : matchType === 'tags' ? '🏷️' : '';
-
-														const allTags = prompt.tags || [];
-														const autoExpand = matchType === 'tags' || matchType === 'both'; // Auto-expand if tags match
-
 														return `
-									<div class="instaraw-rpg-library-card ${batchCount > 0 ? 'in-batch' : ''}" data-id="${prompt.id}">
+									<div class="instaraw-rpg-library-card ${isInBatch ? 'in-batch' : ''}" data-id="${prompt.id}">
 										<div class="instaraw-rpg-library-card-header">
 											<button class="instaraw-rpg-bookmark-btn ${bookmarks.includes(prompt.id) ? "bookmarked" : ""}" data-id="${prompt.id}">
 												${bookmarks.includes(prompt.id) ? "⭐" : "☆"}
 											</button>
-											<div class="instaraw-rpg-batch-controls">
-												<button class="instaraw-rpg-add-to-batch-btn" data-id="${prompt.id}">+ Add</button>
-												${batchCount > 0 ? `<button class="instaraw-rpg-undo-batch-btn" data-id="${prompt.id}">↶ ${batchCount}</button>` : ''}
-											</div>
+											<button class="instaraw-rpg-add-to-batch-btn" data-id="${prompt.id}">${isInBatch ? '✓ In Batch' : '+ Add'}</button>
 										</div>
 										<div class="instaraw-rpg-library-card-content">
-											${matchBadge ? `<div class="instaraw-rpg-match-badge">${matchBadge} Match</div>` : ''}
-
-											${sdxlMode ? `
-												<!-- SDXL Mode: Show tags as comma-separated text -->
-												<div class="instaraw-rpg-prompt-preview">
-													${allTags.map((tag) => highlightSearchTerm(tag, searchQuery)).join(", ")}
-												</div>
-											` : `
-												<!-- Normal Mode: Prompt primary, tags secondary with expand/collapse -->
-												<div class="instaraw-rpg-prompt-preview ${!positive ? 'instaraw-rpg-error-text' : ''}">${highlightSearchTerm(displayText, searchQuery)}</div>
-												<div class="instaraw-rpg-library-card-tags" data-expanded="${autoExpand}" data-prompt-id="${prompt.id}">
-													${autoExpand || allTags.length <= 5
-														? allTags.map((tag) => `<span class="instaraw-rpg-tag">${highlightSearchTerm(tag, searchQuery)}</span>`).join("")
-														: allTags.slice(0, 5).map((tag) => `<span class="instaraw-rpg-tag">${highlightSearchTerm(tag, searchQuery)}</span>`).join("")
-													}
-													${allTags.length > 5 ? `<button class="instaraw-rpg-toggle-tags-btn" data-id="${prompt.id}">${autoExpand ? 'Show less' : '+' + (allTags.length - 5)}</button>` : ""}
-												</div>
-											`}
+											<div class="instaraw-rpg-prompt-preview ${!positive ? 'instaraw-rpg-error-text' : ''}">${escapeHtml(displayText)}</div>
+											<div class="instaraw-rpg-library-card-tags">
+												${(prompt.tags || [])
+													.slice(0, 5)
+													.map((tag) => `<span class="instaraw-rpg-tag">${tag}</span>`)
+													.join("")}
+												${prompt.tags?.length > 5 ? `<span class="instaraw-rpg-tag-more">+${prompt.tags.length - 5}</span>` : ""}
+											</div>
 										</div>
 									</div>
 								`;
@@ -748,9 +699,6 @@ app.registerExtension({
 
 				// === Batch Panel (AIL Item Style) ===
 				const renderBatchPanel = (promptQueue, totalGenerations) => {
-					const filters = JSON.parse(node.properties.library_filters || "{}");
-					const sdxlMode = filters.sdxl_mode || false;
-
 					const gridContent =
 						promptQueue.length === 0
 							? `<div class="instaraw-rpg-empty"><p>No prompts in batch</p><p class="instaraw-rpg-hint">Add prompts from Library or Creative mode</p></div>`
@@ -760,7 +708,7 @@ app.registerExtension({
 											const sourceType = entry.source_id ? 'from-library' : 'from-ai';
 											const sourceBadgeText = entry.source_id ? '📚 Library' : '✨ AI Generated';
 											return `
-							<div class="instaraw-rpg-batch-item" data-id="${entry.id}" data-idx="${idx}" draggable="${reorderModeEnabled}">
+							<div class="instaraw-rpg-batch-item" data-id="${entry.id}" data-idx="${idx}" draggable="true">
 								<div class="instaraw-rpg-batch-item-header">
 									<div style="display: flex; align-items: center; gap: 8px;">
 										<span class="instaraw-rpg-batch-item-number">#${idx + 1}</span>
@@ -773,26 +721,24 @@ app.registerExtension({
 									</div>
 								</div>
 								<div class="instaraw-rpg-batch-item-content">
-									${sdxlMode && entry.tags && entry.tags.length > 0 ? `
-										<!-- SDXL Mode: Show tags instead of positive prompt -->
-										<label>SDXL Prompt (Tags)</label>
-										<div class="instaraw-rpg-sdxl-prompt-text">
-											${entry.tags.join(", ")}
-										</div>
+									<label>Positive Prompt</label>
+									<textarea class="instaraw-rpg-prompt-textarea instaraw-rpg-positive-textarea" data-id="${entry.id}" rows="3">${entry.positive_prompt || ""}</textarea>
 
-										<label>Negative Prompt</label>
-										<textarea class="instaraw-rpg-prompt-textarea instaraw-rpg-negative-textarea" data-id="${entry.id}" rows="2" draggable="false">${entry.negative_prompt || ""}</textarea>
-									` : `
-										<!-- Normal Mode: Show positive and negative textareas -->
-										<label>Positive Prompt</label>
-										<textarea class="instaraw-rpg-prompt-textarea instaraw-rpg-positive-textarea" data-id="${entry.id}" rows="3" draggable="false">${entry.positive_prompt || ""}</textarea>
+									<div class="instaraw-rpg-negative-toggle">
+										<label>
+											<input type="checkbox" class="instaraw-rpg-checkbox instaraw-rpg-negative-checkbox" data-id="${entry.id}" ${entry.negative_prompt ? "checked" : ""} />
+											Custom Negative
+										</label>
+									</div>
+									${
+										entry.negative_prompt
+											? `<textarea class="instaraw-rpg-prompt-textarea instaraw-rpg-negative-textarea" data-id="${entry.id}" rows="2">${entry.negative_prompt || ""}</textarea>`
+											: ""
+									}
 
-										<label>Negative Prompt</label>
-										<textarea class="instaraw-rpg-prompt-textarea instaraw-rpg-negative-textarea" data-id="${entry.id}" rows="2" draggable="false">${entry.negative_prompt || ""}</textarea>
-									`}
-
-									${entry.tags && entry.tags.length > 0 && !sdxlMode
-										? `
+									${
+										entry.tags && entry.tags.length > 0
+											? `
 										<div class="instaraw-rpg-batch-item-tags">
 											${entry.tags
 												.slice(0, 3)
@@ -801,7 +747,7 @@ app.registerExtension({
 											${entry.tags.length > 3 ? `<span class="instaraw-rpg-tag-more">+${entry.tags.length - 3}</span>` : ""}
 										</div>
 									`
-										: ""
+											: ""
 									}
 								</div>
 							</div>
@@ -822,9 +768,6 @@ app.registerExtension({
 								</p>
 							</div>
 							<div class="instaraw-rpg-batch-actions">
-								<button class="instaraw-rpg-btn-secondary instaraw-rpg-reorder-toggle-btn">
-									${reorderModeEnabled ? '🔓 Reorder ON' : '🔒 Reorder OFF'}
-								</button>
 								<span class="instaraw-rpg-batch-count">${totalGenerations} generation${totalGenerations !== 1 ? "s" : ""}</span>
 								${promptQueue.length > 0 ? `<button class="instaraw-rpg-btn-secondary instaraw-rpg-clear-batch-btn">🗑️ Clear All</button>` : ""}
 							</div>
@@ -885,17 +828,13 @@ app.registerExtension({
 
 					let filtered = database;
 
-					// Search query with match tracking
+					// Search query
 					if (filters.search_query && filters.search_query.trim() !== "") {
 						const query = filters.search_query.toLowerCase();
 						filtered = filtered.filter((p) => {
 							const positive = (p.prompt?.positive || "").toLowerCase();
 							const tags = (p.tags || []).join(" ").toLowerCase();
-							const matchInPrompt = positive.includes(query);
-							const matchInTags = tags.includes(query);
-							// Store match type for highlighting
-							p._matchType = matchInPrompt ? (matchInTags ? 'both' : 'prompt') : (matchInTags ? 'tags' : null);
-							return matchInPrompt || matchInTags;
+							return positive.includes(query) || tags.includes(query);
 						});
 					}
 
@@ -932,12 +871,6 @@ app.registerExtension({
 						.replace(/>/g, "&gt;")
 						.replace(/"/g, "&quot;")
 						.replace(/'/g, "&#39;");
-				};
-
-				const highlightSearchTerm = (text, searchQuery) => {
-					if (!text || !searchQuery) return escapeHtml(text);
-					const regex = new RegExp(`(${searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
-					return escapeHtml(text).replace(regex, '<mark class="instaraw-rpg-highlight">$1</mark>');
 				};
 
 				const generateUniqueId = () => {
@@ -1188,8 +1121,6 @@ app.registerExtension({
 						shot_type: "any",
 						quality: "any",
 						search_query: "",
-						show_bookmarked: false,
-						sdxl_mode: false,
 					});
 					currentPage = 0;
 					renderUI();
@@ -1712,49 +1643,18 @@ app.registerExtension({
 						};
 					});
 
-					// Show bookmarked checkbox
-					const showBookmarkedCheckbox = container.querySelector(".instaraw-rpg-show-bookmarked-checkbox");
-					if (showBookmarkedCheckbox) {
-						showBookmarkedCheckbox.onchange = (e) => {
-							updateFilter("show_bookmarked", e.target.checked);
-						};
-					}
-
-					// SDXL mode checkbox
-					const sdxlModeCheckbox = container.querySelector(".instaraw-rpg-sdxl-mode-checkbox");
-					if (sdxlModeCheckbox) {
-						sdxlModeCheckbox.onchange = (e) => {
-							updateFilter("sdxl_mode", e.target.checked);
-						};
-					}
-
 					// Clear filters
 					const clearFiltersBtn = container.querySelector(".instaraw-rpg-clear-filters-btn");
 					if (clearFiltersBtn) {
 						clearFiltersBtn.onclick = clearFilters;
 					}
 
-					// Add to batch buttons (always adds)
+					// Add to batch buttons
 					container.querySelectorAll(".instaraw-rpg-add-to-batch-btn").forEach((btn) => {
 						btn.onclick = () => {
 							const promptId = btn.dataset.id;
 							const promptData = promptsDatabase.find((p) => p.id === promptId);
 							if (promptData) addPromptToBatch(promptData);
-						};
-					});
-
-					// Undo batch buttons (removes last instance)
-					container.querySelectorAll(".instaraw-rpg-undo-batch-btn").forEach((btn) => {
-						btn.onclick = () => {
-							const promptId = btn.dataset.id;
-							const promptQueue = parsePromptBatch();
-							// Find all instances with this source_id
-							const instances = promptQueue.filter(p => p.source_id === promptId);
-							if (instances.length > 0) {
-								// Remove the last one added
-								const lastInstance = instances[instances.length - 1];
-								deletePromptFromBatch(lastInstance.id);
-							}
 						};
 					});
 
@@ -1766,53 +1666,24 @@ app.registerExtension({
 						};
 					});
 
-					// Toggle tags buttons (expand/collapse) - use event delegation
-					container.addEventListener('click', (e) => {
-						if (e.target.classList.contains('instaraw-rpg-toggle-tags-btn')) {
-							e.stopPropagation();
-							const promptId = e.target.dataset.id;
-							const card = e.target.closest('.instaraw-rpg-library-card');
-							const tagsContainer = card.querySelector('.instaraw-rpg-library-card-tags');
-							const prompt = promptsDatabase.find(p => p.id === promptId);
-
-							if (prompt && tagsContainer) {
-								const isExpanded = tagsContainer.getAttribute('data-expanded') === 'true';
-								const filters = JSON.parse(node.properties.library_filters || "{}");
-								const searchQuery = filters.search_query?.trim() || "";
-
-								if (isExpanded) {
-									// Collapse - show only first 5
-									tagsContainer.setAttribute('data-expanded', 'false');
-									tagsContainer.innerHTML = prompt.tags.slice(0, 5)
-										.map(tag => `<span class="instaraw-rpg-tag">${highlightSearchTerm(tag, searchQuery)}</span>`)
-										.join("") + ` <button class="instaraw-rpg-toggle-tags-btn" data-id="${promptId}">+${prompt.tags.length - 5}</button>`;
-								} else {
-									// Expand - show all tags
-									tagsContainer.setAttribute('data-expanded', 'true');
-									tagsContainer.innerHTML = prompt.tags
-										.map(tag => `<span class="instaraw-rpg-tag">${highlightSearchTerm(tag, searchQuery)}</span>`)
-										.join("") + ` <button class="instaraw-rpg-toggle-tags-btn" data-id="${promptId}">Show less</button>`;
-								}
-							}
-						}
-					});
-
 					// Pagination
-					container.querySelectorAll(".instaraw-rpg-prev-page-btn").forEach((prevPageBtn) => {
+					const prevPageBtn = container.querySelector(".instaraw-rpg-prev-page-btn");
+					if (prevPageBtn) {
 						prevPageBtn.onclick = () => {
 							if (currentPage > 0) {
 								currentPage--;
 								renderUI();
 							}
 						};
-					});
+					}
 
-					container.querySelectorAll(".instaraw-rpg-next-page-btn").forEach((nextPageBtn) => {
+					const nextPageBtn = container.querySelector(".instaraw-rpg-next-page-btn");
+					if (nextPageBtn) {
 						nextPageBtn.onclick = () => {
 							currentPage++;
 							renderUI();
 						};
-					});
+					}
 
 					// Batch item controls
 					container.querySelectorAll(".instaraw-rpg-positive-textarea").forEach((textarea) => {
@@ -1821,6 +1692,7 @@ app.registerExtension({
 						textarea.onchange = (e) => {
 							updatePromptInBatch(textarea.dataset.id, "positive_prompt", e.target.value);
 						};
+						textarea.onmousedown = (e) => e.stopPropagation();
 					});
 
 					container.querySelectorAll(".instaraw-rpg-negative-textarea").forEach((textarea) => {
@@ -1828,6 +1700,17 @@ app.registerExtension({
 						textarea.oninput = (e) => autoResizeTextarea(textarea);
 						textarea.onchange = (e) => {
 							updatePromptInBatch(textarea.dataset.id, "negative_prompt", e.target.value);
+						};
+						textarea.onmousedown = (e) => e.stopPropagation();
+					});
+
+					container.querySelectorAll(".instaraw-rpg-negative-checkbox").forEach((checkbox) => {
+						checkbox.onchange = (e) => {
+							if (!e.target.checked) {
+								updatePromptInBatch(checkbox.dataset.id, "negative_prompt", "");
+							} else {
+								renderUI(); // Re-render to show textarea
+							}
 						};
 					});
 
@@ -1849,15 +1732,6 @@ app.registerExtension({
 					const clearBatchBtn = container.querySelector(".instaraw-rpg-clear-batch-btn");
 					if (clearBatchBtn) {
 						clearBatchBtn.onclick = clearBatch;
-					}
-
-					// Reorder toggle button
-					const reorderToggleBtn = container.querySelector(".instaraw-rpg-reorder-toggle-btn");
-					if (reorderToggleBtn) {
-						reorderToggleBtn.onclick = () => {
-							reorderModeEnabled = !reorderModeEnabled;
-							renderUI();
-						};
 					}
 
 					// Creative mode buttons
@@ -1895,12 +1769,10 @@ app.registerExtension({
 
 				// === Drag and Drop (Exact AIL Pattern) ===
 				const setupDragAndDrop = () => {
-					// Drag-and-drop reordering (only when enabled)
-					if (reorderModeEnabled) {
-						const items = container.querySelectorAll(".instaraw-rpg-batch-item");
-						let draggedItem = null;
+					const items = container.querySelectorAll(".instaraw-rpg-batch-item");
+					let draggedItem = null;
 
-						items.forEach((item) => {
+					items.forEach((item) => {
 						item.addEventListener("dragstart", (e) => {
 							draggedItem = item;
 							item.style.opacity = "0.5";
@@ -1948,7 +1820,6 @@ app.registerExtension({
 							renderUI();
 						});
 					});
-					}
 				};
 
 				// === AIL Update Listener ===

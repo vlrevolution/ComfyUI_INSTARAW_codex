@@ -162,24 +162,31 @@
 	border-color: #a78bfa;
 }
 
-/* === Content Layout === */
+/* === Content Layout (Stacked Full-Width) === */
 .instaraw-rpg-content {
-	display: grid;
-	grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+	display: flex;
+	flex-direction: column;
 	gap: 16px;
 	margin-bottom: 16px;
-	align-items: flex-start;
 }
 
-.instaraw-rpg-main-panel,
+.instaraw-rpg-main-panel {
+	background: rgba(255, 255, 255, 0.03);
+	border: 1px solid rgba(255, 255, 255, 0.06);
+	border-radius: 4px;
+	padding: 16px;
+	width: 100%;
+}
+
 .instaraw-rpg-batch-panel {
 	background: rgba(255, 255, 255, 0.03);
 	border: 1px solid rgba(255, 255, 255, 0.06);
 	border-radius: 4px;
 	padding: 16px;
-	min-height: 320px;
-	max-height: 640px;
-	overflow-y: auto;
+	width: 100%;
+	min-height: 200px;
+	/* No max-height - let it grow naturally */
+	overflow-y: visible;
 }
 
 .instaraw-rpg-panel-card {
@@ -373,9 +380,76 @@
 	border-color: #818cf8;
 }
 
+.instaraw-rpg-checkbox-label {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 8px 12px;
+	background: rgba(255, 255, 255, 0.05);
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	border-radius: 4px;
+	cursor: pointer;
+	font-size: 12px;
+	color: #f9fafb;
+	white-space: nowrap;
+	user-select: none;
+}
+
+.instaraw-rpg-checkbox-label:hover {
+	background: rgba(255, 255, 255, 0.08);
+	border-color: #818cf8;
+}
+
+.instaraw-rpg-checkbox-label input[type="checkbox"] {
+	cursor: pointer;
+	margin: 0;
+}
+
+.instaraw-rpg-library-header {
+	margin: 12px 0 8px 0;
+	padding: 8px 0;
+	border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.instaraw-rpg-result-count {
+	font-size: 13px;
+	color: rgba(249, 250, 251, 0.7);
+	font-weight: 500;
+}
+
+.instaraw-rpg-sdxl-toggle {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 10px;
+	background: rgba(167, 139, 250, 0.15);
+	border: 1px solid rgba(167, 139, 250, 0.3);
+	border-radius: 4px;
+	cursor: pointer;
+	font-size: 12px;
+	color: #c4b5fd;
+	white-space: nowrap;
+	user-select: none;
+	transition: all 0.2s ease;
+}
+
+.instaraw-rpg-sdxl-toggle:hover {
+	background: rgba(167, 139, 250, 0.25);
+	border-color: rgba(167, 139, 250, 0.5);
+}
+
+.instaraw-rpg-sdxl-toggle input[type="checkbox"] {
+	cursor: pointer;
+	margin: 0;
+}
+
+.instaraw-rpg-pagination-top {
+	margin-bottom: 12px;
+}
+
 .instaraw-rpg-library-grid {
 	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+	grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 	gap: 12px;
 }
 
@@ -390,11 +464,18 @@
 	border: 2px solid rgba(255, 255, 255, 0.08);
 	border-radius: 4px;
 	overflow: hidden;
+	position: relative;
 }
 
 .instaraw-rpg-library-card:hover {
 	border-color: rgba(99, 102, 241, 0.5);
 }
+
+.instaraw-rpg-library-card.in-batch {
+	border-color: rgba(167, 139, 250, 0.4);
+}
+
+/* Badge removed - button now shows Remove state instead */
 
 .instaraw-rpg-library-card-header {
 	display: flex;
@@ -436,6 +517,26 @@
 	background: #4f46e5;
 }
 
+.instaraw-rpg-batch-controls {
+	display: flex;
+	gap: 4px;
+}
+
+.instaraw-rpg-undo-batch-btn {
+	background: #dc2626;
+	color: #ffffff;
+	border: none;
+	padding: 4px 10px;
+	border-radius: 4px;
+	cursor: pointer;
+	font-size: 11px;
+	font-weight: 600;
+}
+
+.instaraw-rpg-undo-batch-btn:hover {
+	background: #b91c1c;
+}
+
 .instaraw-rpg-library-card-content {
 	padding: 12px;
 }
@@ -445,6 +546,11 @@
 	color: rgba(249, 250, 251, 0.8);
 	line-height: 1.4;
 	margin-bottom: 8px;
+}
+
+.instaraw-rpg-error-text {
+	color: rgba(251, 191, 36, 0.9) !important;
+	font-style: italic;
 }
 
 .instaraw-rpg-library-card-tags {
@@ -469,6 +575,91 @@
 	border-radius: 3px;
 	font-size: 10px;
 	font-weight: 500;
+}
+
+/* === Search Highlighting === */
+.instaraw-rpg-highlight {
+	background: rgba(251, 191, 36, 0.4);
+	color: #fbbf24;
+	font-weight: 600;
+	padding: 1px 2px;
+	border-radius: 2px;
+}
+
+/* === Match Badge === */
+.instaraw-rpg-match-badge {
+	display: inline-block;
+	background: rgba(34, 197, 94, 0.2);
+	color: #22c55e;
+	padding: 4px 8px;
+	border-radius: 4px;
+	font-size: 10px;
+	font-weight: 600;
+	margin-bottom: 8px;
+}
+
+/* === SDXL Mode Styles === */
+.instaraw-rpg-tags-primary {
+	margin-bottom: 8px;
+}
+
+/* SDXL mode uses existing .instaraw-rpg-prompt-preview for clean display */
+
+.instaraw-rpg-expandable-tags {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	align-items: center;
+}
+
+.instaraw-rpg-expandable-tags[data-expanded="false"] {
+	max-height: 80px;
+	overflow: hidden;
+}
+
+.instaraw-rpg-expandable-tags[data-expanded="true"] {
+	max-height: none;
+}
+
+.instaraw-rpg-expand-tags-btn {
+	background: rgba(99, 102, 241, 0.2);
+	color: #818cf8;
+	border: 1px solid rgba(99, 102, 241, 0.3);
+	padding: 2px 8px;
+	border-radius: 3px;
+	font-size: 10px;
+	font-weight: 600;
+	cursor: pointer;
+	transition: all 0.2s ease;
+}
+
+.instaraw-rpg-expand-tags-btn:hover {
+	background: rgba(99, 102, 241, 0.3);
+	border-color: rgba(99, 102, 241, 0.5);
+}
+
+.instaraw-rpg-prompt-preview-small {
+	font-size: 11px;
+	color: rgba(249, 250, 251, 0.5);
+	line-height: 1.4;
+	font-style: italic;
+}
+
+.instaraw-rpg-toggle-tags-btn {
+	background: rgba(129, 140, 248, 0.2);
+	color: #818cf8;
+	border: 1px solid rgba(129, 140, 248, 0.3);
+	padding: 2px 8px;
+	border-radius: 3px;
+	font-size: 10px;
+	font-weight: 600;
+	cursor: pointer;
+	transition: all 0.2s ease;
+}
+
+.instaraw-rpg-toggle-tags-btn:hover {
+	background: rgba(129, 140, 248, 0.3);
+	border-color: rgba(129, 140, 248, 0.5);
 }
 
 /* === Pagination === */
@@ -737,10 +928,32 @@
 	font-weight: 600;
 }
 
+.instaraw-rpg-reorder-toggle-btn {
+	background: rgba(99, 102, 241, 0.2);
+	color: #818cf8;
+	border: 1px solid rgba(99, 102, 241, 0.3);
+	padding: 6px 12px;
+	border-radius: 4px;
+	font-size: 12px;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.instaraw-rpg-reorder-toggle-btn:hover {
+	background: rgba(99, 102, 241, 0.3);
+	border-color: rgba(99, 102, 241, 0.5);
+}
+
 .instaraw-rpg-batch-grid {
 	display: grid;
-	grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+	grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
 	gap: 12px;
+}
+
+@media (max-width: 720px) {
+	.instaraw-rpg-batch-grid {
+		grid-template-columns: 1fr;
+	}
 }
 
 .instaraw-rpg-batch-item {
@@ -802,6 +1015,28 @@
 	font-weight: 600;
 }
 
+.instaraw-rpg-source-badge {
+	padding: 4px 8px;
+	border-radius: 4px;
+	font-size: 10px;
+	font-weight: 600;
+}
+
+.instaraw-rpg-source-badge.from-library {
+	background: rgba(59, 130, 246, 0.2);
+	color: #60a5fa;
+}
+
+.instaraw-rpg-source-badge.from-ai {
+	background: rgba(167, 139, 250, 0.2);
+	color: #c4b5fd;
+}
+
+.instaraw-rpg-source-badge.from-character {
+	background: rgba(236, 72, 153, 0.2);
+	color: #f9a8d4;
+}
+
 .instaraw-rpg-batch-delete-btn {
 	background: #ef4444;
 	color: #ffffff;
@@ -828,6 +1063,44 @@
 	gap: 8px;
 }
 
+.instaraw-rpg-batch-tags-display {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	padding: 8px;
+	background: rgba(167, 139, 250, 0.1);
+	border: 1px solid rgba(167, 139, 250, 0.2);
+	border-radius: 4px;
+	margin-bottom: 8px;
+}
+
+.instaraw-rpg-batch-tags-text {
+	font-size: 12px;
+	line-height: 1.6;
+	color: rgba(249, 250, 251, 0.9);
+	padding: 10px;
+	background: rgba(167, 139, 250, 0.08);
+	border: 1px solid rgba(167, 139, 250, 0.2);
+	border-radius: 4px;
+	margin-bottom: 12px;
+	font-family: 'Inter', monospace;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.instaraw-rpg-sdxl-prompt-text {
+	font-size: 12px;
+	line-height: 1.6;
+	color: rgba(249, 250, 251, 0.9);
+	padding: 10px;
+	background: rgba(255, 255, 255, 0.06);
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	border-radius: 4px;
+	margin-bottom: 12px;
+	word-break: break-word;
+	min-height: 64px;
+}
+
 .instaraw-rpg-batch-item-content label {
 	font-size: 11px;
 	font-weight: 500;
@@ -848,6 +1121,7 @@
 	resize: none;
 	line-height: 1.4;
 	min-height: 64px;
+	overflow-y: hidden;
 }
 
 .instaraw-rpg-prompt-textarea:focus {
