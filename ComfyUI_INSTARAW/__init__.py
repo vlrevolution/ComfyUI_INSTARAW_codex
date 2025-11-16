@@ -24,6 +24,13 @@ if "ComfyUI_INSTARAW" not in nodes.EXTENSION_WEB_DIRS:
 
 from .nodes import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
 
+# Import creative API to register endpoints (after nodes are loaded)
+try:
+    from .nodes.api_nodes import creative_api
+except Exception as e:
+    print(f"[INSTARAW] Warning: Could not load creative_api: {e}")
+    print("[INSTARAW] Creative/Character generation features will not be available.")
+
 # Required exports for ComfyUI
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
 

@@ -127,6 +127,20 @@ app.registerExtension({
 					setupEventHandlers();
 					setupDragAndDrop();
 					updateCachedHeight();
+
+					// Dispatch update event for other nodes (e.g., RPG)
+					window.dispatchEvent(new CustomEvent("INSTARAW_AIL_UPDATED", {
+						detail: {
+							nodeId: node.id,
+							images: order.map(imgId => {
+								const img = images.find(i => i.id === imgId);
+								if (!img) return null;
+								const thumbUrl = `/view?filename=${img.thumbnail}&type=input&subfolder=INSTARAW_BatchUploads/${node.id}`;
+								return {url: thumbUrl, index: order.indexOf(imgId), id: imgId};
+							}).filter(i => i !== null),
+							total: batchData.total_count || 0
+						}
+					}));
 				};
 
 				const handleFileSelect = async (e) => {

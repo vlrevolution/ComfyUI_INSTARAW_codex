@@ -33,12 +33,13 @@ app.registerExtension({
         { id: "INSTARAW.Interactive.FPS", name: "Video Frames per Second", type: "int", defaultValue: 5 }
     ],
     setup() {
-        create('link', null, document.getElementsByTagName('HEAD')[0], { 'rel': 'stylesheet', 'type': 'text/css', 'href': 'extensions/ComfyUI_INSTARAW/filter.css' });
-        create('link', null, document.getElementsByTagName('HEAD')[0], { 'rel': 'stylesheet', 'type': 'text/css', 'href': 'extensions/ComfyUI_INSTARAW/floating_window.css' });
-        create('link', null, document.getElementsByTagName('HEAD')[0], { 'rel': 'stylesheet', 'type': 'text/css', 'href': 'extensions/ComfyUI_INSTARAW/zoomed.css' });
-        create('link', null, document.getElementsByTagName('HEAD')[0], { 'rel': 'stylesheet', 'type': 'text/css', 'href': 'extensions/ComfyUI_INSTARAW/advanced_image_loader.css' });
+		create('link', null, document.getElementsByTagName('HEAD')[0], { 'rel': 'stylesheet', 'type': 'text/css', 'href': 'extensions/ComfyUI_INSTARAW/filter.css' });
+		create('link', null, document.getElementsByTagName('HEAD')[0], { 'rel': 'stylesheet', 'type': 'text/css', 'href': 'extensions/ComfyUI_INSTARAW/floating_window.css' });
+		create('link', null, document.getElementsByTagName('HEAD')[0], { 'rel': 'stylesheet', 'type': 'text/css', 'href': 'extensions/ComfyUI_INSTARAW/zoomed.css' });
+		create('link', null, document.getElementsByTagName('HEAD')[0], { 'rel': 'stylesheet', 'type': 'text/css', 'href': 'extensions/ComfyUI_INSTARAW/advanced_image_loader.css' });
+		create('link', null, document.getElementsByTagName('HEAD')[0], { 'rel': 'stylesheet', 'type': 'text/css', 'href': 'extensions/ComfyUI_INSTARAW/reality_prompt_generator.css' });
 
-        api.addEventListener("execution_interrupted", popup.send_cancel.bind(popup));
+		api.addEventListener("execution_interrupted", popup.send_cancel.bind(popup));
         api.addEventListener("instaraw-interactive-images", popup.handle_message.bind(popup));
     },
     async beforeRegisterNodeDef(nodeType, nodeData, app) {
