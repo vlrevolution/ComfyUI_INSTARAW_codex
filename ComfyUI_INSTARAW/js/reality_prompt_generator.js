@@ -465,7 +465,6 @@ app.registerExtension({
 									<select class="instaraw-rpg-filter-dropdown" data-filter="content_type">
 										<option value="any">All Content Types</option>
 										<option value="person" ${filters.content_type === "person" ? "selected" : ""}>Person</option>
-										<option value="landscape" ${filters.content_type === "landscape" ? "selected" : ""}>Landscape</option>
 										<option value="object" ${filters.content_type === "object" ? "selected" : ""}>Object</option>
 									</select>
 									<select class="instaraw-rpg-filter-dropdown" data-filter="safety_level">
@@ -478,7 +477,6 @@ app.registerExtension({
 										<option value="any">All Shot Types</option>
 										<option value="portrait" ${filters.shot_type === "portrait" ? "selected" : ""}>Portrait</option>
 										<option value="full_body" ${filters.shot_type === "full_body" ? "selected" : ""}>Full Body</option>
-										<option value="close_up" ${filters.shot_type === "close_up" ? "selected" : ""}>Close Up</option>
 									</select>
 									<label class="instaraw-rpg-checkbox-label" title="Show only bookmarked prompts">
 										<input type="checkbox" class="instaraw-rpg-show-bookmarked-checkbox" ${filters.show_bookmarked ? "checked" : ""} />
@@ -774,11 +772,9 @@ app.registerExtension({
 								</div>
 								<div class="instaraw-rpg-batch-item-content">
 									${sdxlMode && entry.tags && entry.tags.length > 0 ? `
-										<!-- SDXL Mode: Show tags instead of positive prompt -->
+										<!-- SDXL Mode: Editable SDXL prompt (tags) -->
 										<label>SDXL Prompt (Tags)</label>
-										<div class="instaraw-rpg-sdxl-prompt-text">
-											${entry.tags.join(", ")}
-										</div>
+										<textarea class="instaraw-rpg-prompt-textarea instaraw-rpg-positive-textarea" data-id="${entry.id}" rows="3" draggable="false">${entry.tags.join(", ")}</textarea>
 
 										<label>Negative Prompt</label>
 										<textarea class="instaraw-rpg-prompt-textarea instaraw-rpg-negative-textarea" data-id="${entry.id}" rows="2" draggable="false">${entry.negative_prompt || ""}</textarea>

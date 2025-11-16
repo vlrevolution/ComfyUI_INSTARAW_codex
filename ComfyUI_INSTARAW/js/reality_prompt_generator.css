@@ -1088,18 +1088,7 @@
 	word-break: break-word;
 }
 
-.instaraw-rpg-sdxl-prompt-text {
-	font-size: 12px;
-	line-height: 1.6;
-	color: rgba(249, 250, 251, 0.9);
-	padding: 10px;
-	background: rgba(255, 255, 255, 0.06);
-	border: 1px solid rgba(255, 255, 255, 0.1);
-	border-radius: 4px;
-	margin-bottom: 12px;
-	word-break: break-word;
-	min-height: 64px;
-}
+/* SDXL mode now uses standard .instaraw-rpg-positive-textarea */
 
 .instaraw-rpg-batch-item-content label {
 	font-size: 11px;
