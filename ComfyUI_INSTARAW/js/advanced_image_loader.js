@@ -333,6 +333,7 @@ app.registerExtension({
 						detail: {
 							nodeId: node.id,
 							mode: "img2img",
+							enable_img2img: true,  // NEW: explicit boolean for easier detection
 							images: order.map(imgId => {
 								const img = images.find(i => i.id === imgId);
 								if (!img) return null;
@@ -442,6 +443,7 @@ app.registerExtension({
 						detail: {
 							nodeId: node.id,
 							mode: "txt2img",
+							enable_img2img: false,  // NEW: explicit boolean for easier detection
 							latents: order.map(latentId => {
 								const latent = latents.find(l => l.id === latentId);
 								if (!latent) return null;

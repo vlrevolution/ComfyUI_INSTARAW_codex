@@ -308,8 +308,7 @@ app.registerExtension({
 
 					const tabs = [
 						{ id: "library", label: "Library", icon: "📚" },
-						{ id: "creative", label: "AI Generator", icon: "✨" },
-						{ id: "character", label: "Character", icon: "👤" },
+						{ id: "generate", label: "Generate", icon: "🎯" },
 					];
 
 					const generationModeLabel = generationMode === "one_per_entry" ? "1 image per entry" : "Respect repeat counts";
@@ -432,9 +431,11 @@ app.registerExtension({
 					switch (activeTab) {
 						case "library":
 							return renderLibraryTab();
-						case "creative":
+						case "generate":
+							return renderGenerateTab(uiState);
+						case "creative":  // LEGACY - Fallback for old workflows
 							return renderCreativeTab(uiState);
-						case "character":
+						case "character":  // LEGACY - Fallback for old workflows
 							return renderCharacterTab();
 						default:
 							return "";
@@ -699,7 +700,165 @@ app.registerExtension({
 					`;
 				};
 
-				// === Character Tab ===
+				// === Unified Generate Tab ===
+				const renderGenerateTab = (uiState) => {
+					const promptQueue = uiState?.promptQueue || [];
+					const detectedMode = node._linkedAILMode || "img2img";
+					const modelOptionsHtml = CREATIVE_MODEL_OPTIONS
+						.map(
+							(opt) => `<option value="${opt.value}" ${opt.value === (uiState?.currentCreativeModel || "gemini-2.5-pro") ? "selected" : ""}>${opt.label}</option>`
+						)
+						.join("");
+					const temperature = uiState?.currentCreativeTemperature ?? 0.9;
+					const topP = uiState?.currentCreativeTopP ?? 0.9;
+
+					// Character likeness state
+					const characterDescription = node.properties.cached_character_description || "";
+					const characterCacheKey = node.properties.character_cache_key || "";
+					const isCached = characterDescription && characterCacheKey;
+
+					return `
+						<div class="instaraw-rpg-generate-unified">
+							<!-- Character Likeness Section -->
+							<div class="instaraw-rpg-section">
+								<div class="instaraw-rpg-section-header">
+									<label class="instaraw-rpg-checkbox-label">
+										<input type="checkbox" class="instaraw-rpg-checkbox instaraw-rpg-enable-character-checkbox" ${node.properties.use_character_likeness ? 'checked' : ''} />
+										<span>Character Likeness</span>
+									</label>
+									<span class="instaraw-rpg-hint-badge">${isCached ? '✅ Cached' : '⚪ Not generated'}</span>
+								</div>
+								<div class="instaraw-rpg-character-section" style="display: ${node.properties.use_character_likeness ? 'block' : 'none'};">
+									<div class="instaraw-rpg-control-group">
+										<label>Character Description</label>
+										<textarea class="instaraw-rpg-character-text-input" placeholder="Describe your character or leave empty to use character image from input..." rows="3">${escapeHtml(node.properties.character_text_input || "")}</textarea>
+									</div>
+									<div class="instaraw-rpg-character-actions">
+										<button class="instaraw-rpg-btn-secondary instaraw-rpg-generate-character-desc-btn">
+											${isCached ? '🔄 Refresh' : '✨ Generate'} Character Description
+										</button>
+										${isCached ? `<button class="instaraw-rpg-btn-text instaraw-rpg-view-character-desc-btn">👁️ View</button>` : ''}
+									</div>
+									${characterDescription ? `
+										<div class="instaraw-rpg-character-preview">
+											<strong>Current Description:</strong>
+											<p class="instaraw-rpg-character-desc-text">${escapeHtml(characterDescription.substring(0, 150))}${characterDescription.length > 150 ? '...' : ''}</p>
+										</div>
+									` : ''}
+								</div>
+							</div>
+
+							<!-- Mode Detection & Settings -->
+							<div class="instaraw-rpg-section">
+								<div class="instaraw-rpg-section-header">
+									<span class="instaraw-rpg-mode-badge ${detectedMode === 'img2img' ? 'instaraw-rpg-mode-img2img' : 'instaraw-rpg-mode-txt2img'}">
+										${detectedMode === 'img2img' ? '🖼️ IMG2IMG' : '🎨 TXT2IMG'}
+									</span>
+									<span class="instaraw-rpg-hint-text">Detected from ${node._linkedAILNodeId ? `AIL #${node._linkedAILNodeId}` : 'Advanced Image Loader'}</span>
+								</div>
+
+								<!-- img2img: Affect Elements -->
+								${detectedMode === 'img2img' ? `
+									<div class="instaraw-rpg-affect-elements">
+										<label class="instaraw-rpg-section-label">Affect Elements (unchecked = describe as-is)</label>
+										<div class="instaraw-rpg-checkbox-grid">
+											<label class="instaraw-rpg-checkbox-label">
+												<input type="checkbox" class="instaraw-rpg-checkbox instaraw-rpg-affect-background" />
+												<span>Background</span>
+											</label>
+											<label class="instaraw-rpg-checkbox-label">
+												<input type="checkbox" class="instaraw-rpg-checkbox instaraw-rpg-affect-outfit" />
+												<span>Outfit</span>
+											</label>
+											<label class="instaraw-rpg-checkbox-label">
+												<input type="checkbox" class="instaraw-rpg-checkbox instaraw-rpg-affect-pose" />
+												<span>Pose</span>
+											</label>
+											<label class="instaraw-rpg-checkbox-label">
+												<input type="checkbox" class="instaraw-rpg-checkbox instaraw-rpg-affect-lighting" />
+												<span>Lighting</span>
+											</label>
+										</div>
+									</div>
+								` : `
+									<!-- txt2img: User Input & Library Inspiration -->
+									<div class="instaraw-rpg-txt2img-settings">
+										<div class="instaraw-rpg-control-group">
+											<label>User Input (optional)</label>
+											<textarea class="instaraw-rpg-user-text-input" placeholder="Describe what you want to generate or leave empty to use only library prompts..." rows="3">${escapeHtml(node.properties.user_text_input || "")}</textarea>
+										</div>
+										<div class="instaraw-rpg-library-controls">
+											<label>Library Inspiration</label>
+											<div class="instaraw-rpg-control-row">
+												<input type="number" class="instaraw-rpg-number-input instaraw-rpg-inspiration-count" value="${node.properties.inspiration_count || 3}" min="0" max="10" />
+												<span>random prompts</span>
+												<button class="instaraw-rpg-btn-text instaraw-rpg-preview-random-btn">🎲 Preview</button>
+											</div>
+										</div>
+									</div>
+								`}
+							</div>
+
+							<!-- Model Settings -->
+							<div class="instaraw-rpg-section">
+								<div class="instaraw-rpg-section-header">
+									<span class="instaraw-rpg-section-label">Model Settings</span>
+								</div>
+								<div class="instaraw-rpg-model-settings">
+									<div class="instaraw-rpg-model-row">
+										<label>Model</label>
+										<select class="instaraw-rpg-model-select">
+											${modelOptionsHtml}
+										</select>
+									</div>
+									<div class="instaraw-rpg-model-grid">
+										<div class="instaraw-rpg-model-control">
+											<label>Temperature</label>
+											<input type="number" class="instaraw-rpg-model-temp" value="${temperature}" min="0" max="2" step="0.01" />
+										</div>
+										<div class="instaraw-rpg-model-control">
+											<label>Top P</label>
+											<input type="number" class="instaraw-rpg-model-top-p" value="${topP}" min="0" max="1" step="0.01" />
+										</div>
+									</div>
+									<div class="instaraw-rpg-checkbox-row">
+										<label class="instaraw-rpg-checkbox-label">
+											<input type="checkbox" class="instaraw-rpg-checkbox instaraw-rpg-is-sdxl-checkbox" ${node.properties.is_sdxl ? 'checked' : ''} />
+											<span>SDXL Mode</span>
+										</label>
+										<label class="instaraw-rpg-checkbox-label" title="Bypass cache and generate fresh results">
+											<input type="checkbox" class="instaraw-rpg-checkbox instaraw-rpg-force-regenerate-checkbox" />
+											<span>🔄 Force Regenerate</span>
+										</label>
+									</div>
+								</div>
+							</div>
+
+							<!-- Generation Count -->
+							<div class="instaraw-rpg-section">
+								<div class="instaraw-rpg-control-group">
+									<label>Generation Count</label>
+									<input type="number" class="instaraw-rpg-number-input instaraw-rpg-gen-count-input" value="${node.properties.generation_count || 5}" min="1" max="50" />
+								</div>
+							</div>
+
+							<!-- Generate Button -->
+							<button class="instaraw-rpg-btn-primary instaraw-rpg-generate-unified-btn">
+								${detectedMode === 'img2img' ? '🖼️' : '🎨'} Generate Prompts
+							</button>
+
+							<!-- Preview Section -->
+							<div class="instaraw-rpg-generate-preview" style="display: none;">
+								<h4>Generated Prompts Preview</h4>
+								<div class="instaraw-rpg-generate-preview-list"></div>
+								<button class="instaraw-rpg-btn-primary instaraw-rpg-accept-generated-btn">✓ Add to Batch</button>
+								<button class="instaraw-rpg-btn-secondary instaraw-rpg-cancel-generated-btn">✖ Cancel</button>
+							</div>
+						</div>
+					`;
+				};
+
+				// === Character Tab (LEGACY - Will be removed) ===
 				const renderCharacterTab = () => {
 					return `
 						<div class="instaraw-rpg-character">
@@ -1949,10 +2108,13 @@ app.registerExtension({
 
 				// === AIL Update Listener ===
 				window.addEventListener("INSTARAW_AIL_UPDATED", (event) => {
-					const { nodeId, images, total } = event.detail;
+					const { nodeId, images, total, mode, enable_img2img } = event.detail;
 					node._linkedAILNodeId = nodeId;
 					node._linkedImages = images;
 					node._linkedImageCount = total;
+					node._linkedAILMode = mode || (enable_img2img ? "img2img" : "txt2img");  // NEW: Store detected mode
+
+					console.log(`[INSTARAW RPG] AIL update - Node: ${nodeId}, Mode: ${node._linkedAILMode}, Images: ${total}`);
 
 					// Update expected_image_count widget
 					const widget = node.widgets?.find((w) => w.name === "expected_image_count");

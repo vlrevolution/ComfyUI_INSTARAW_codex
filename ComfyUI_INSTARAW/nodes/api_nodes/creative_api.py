@@ -172,31 +172,70 @@ def parse_prompt_json(text):
         }]
 
 
-def build_system_prompt(is_sdxl=False, character_reference=""):
+def build_system_prompt(is_sdxl=False, character_description="", generation_mode="img2img", affect_elements=None, user_text_input="", random_inspiration_prompts=None):
     """
     Build system prompt for creative generation.
-    """
-    base_prompt = """You are an expert AI prompt engineer specializing in creating high-quality, detailed prompts for image generation models.
 
-Your task is to generate creative, diverse, and professional prompts that can be used for image generation."""
+    Args:
+        is_sdxl: Whether to optimize for SDXL
+        character_description: Detailed character description for consistency
+        generation_mode: "img2img" or "txt2img"
+        affect_elements: List of elements to modify (img2img only): ["background", "outfit", "pose", "lighting"]
+        user_text_input: User's custom input (txt2img only)
+        random_inspiration_prompts: List of random prompts for inspiration (txt2img only)
+    """
+    base_prompt = """You are an expert AI prompt engineer specializing in creating high-quality, detailed prompts for REALISTIC photographic image generation models.
+
+IMPORTANT: All images are REALISTIC photography. Do not include artistic styles, illustrations, or non-photographic elements."""
 
     if is_sdxl:
-        base_prompt += "\n\nIMPORTANT: Generate prompts optimized for SDXL (Stable Diffusion XL). Use SDXL-specific quality tags and styling."
+        base_prompt += "\n\nIMPORTANT: Generate prompts optimized for SDXL (Stable Diffusion XL). Use SDXL-specific quality tags like 'masterpiece', 'best quality', 'photorealistic', 'high resolution'."
 
-    if character_reference and character_reference.strip():
-        base_prompt += f"\n\nCHARACTER REFERENCE: All prompts must include and maintain consistency with this character reference: {character_reference}"
+    # Character consistency
+    if character_description and character_description.strip():
+        base_prompt += f"\n\nCHARACTER CONSISTENCY: All prompts must accurately describe this character with exact physical features:\n{character_description}"
+
+    # Mode-specific instructions
+    if generation_mode == "img2img":
+        base_prompt += "\n\nMODE: Image-to-Image Generation"
+
+        if affect_elements and len(affect_elements) > 0:
+            # Inclusion mode - only modify checked elements
+            elements_str = ", ".join(affect_elements)
+            base_prompt += f"\n\nIMPORTANT INSTRUCTION: You are modifying ONLY these elements: {elements_str}"
+            base_prompt += "\n\nFor all OTHER elements NOT in this list, describe them EXACTLY as they appear in the input image. Do not change or modify them."
+            base_prompt += f"\n\nElements to MODIFY creatively: {elements_str}"
+            base_prompt += "\nElements to KEEP as-is: Everything else (describe exactly as shown)"
+        else:
+            # No checkboxes - describe as-is
+            base_prompt += "\n\nIMPORTANT INSTRUCTION: Describe the input images EXACTLY as they appear. Create detailed, accurate descriptions that capture all visual elements faithfully."
+
+    elif generation_mode == "txt2img":
+        base_prompt += "\n\nMODE: Text-to-Image Generation (creating new prompts from scratch)"
+
+        if random_inspiration_prompts and len(random_inspiration_prompts) > 0:
+            base_prompt += "\n\nINSPIRATION PROMPTS: Use these prompts as creative inspiration for generating diverse, high-quality variations:"
+            for i, prompt in enumerate(random_inspiration_prompts[:5]):  # Limit to 5 for context
+                pos = prompt.get("prompt", {}).get("positive", "")
+                tags = ", ".join(prompt.get("tags", [])[:5])
+                base_prompt += f"\n\nInspiration {i+1}:"
+                base_prompt += f"\nPrompt: {pos[:200]}..."  # Truncate long prompts
+                base_prompt += f"\nTags: {tags}"
+
+        if user_text_input and user_text_input.strip():
+            base_prompt += f"\n\nUSER INPUT: Incorporate this user guidance into your prompts:\n{user_text_input}"
 
     base_prompt += """\n\nOUTPUT FORMAT: You MUST return a valid JSON array of prompt objects. Do not include any other text or markdown. Each object must have these keys:
-- "positive": A string containing the detailed positive prompt.
-- "negative": A string containing the negative prompt (can be empty).
-- "tags": An array of strings representing relevant tags.
+- "positive": A string containing the detailed positive prompt for realistic photography
+- "negative": A string containing the negative prompt (avoid: unrealistic, illustration, painting, drawing, art, artistic, low quality, deformed, etc.)
+- "tags": An array of strings representing relevant tags
 
 Example:
 [
   {
-    "positive": "masterpiece, best quality, 1girl, blonde hair, blue eyes, smiling, park background, natural lighting, photorealistic",
-    "negative": "deformed, bad anatomy, blurry, low quality",
-    "tags": ["portrait", "photorealistic", "outdoor"]
+    "positive": "masterpiece, best quality, photorealistic, high resolution, professional photography, 1girl, blonde hair, blue eyes, smiling, park background, natural sunlight, bokeh, sharp focus",
+    "negative": "unrealistic, illustration, painting, drawing, art, artistic, low quality, deformed, bad anatomy, blurry, amateur",
+    "tags": ["portrait", "photorealistic", "outdoor", "natural_lighting"]
   }
 ]
 """
@@ -204,40 +243,44 @@ Example:
     return base_prompt
 
 
-def build_user_prompt(source_prompts, generation_count, inspiration_count):
+def build_user_prompt(generation_count, generation_mode="img2img", images_data=None):
     """
     Build user prompt for creative generation.
+
+    Args:
+        generation_count: Number of prompts to generate
+        generation_mode: "img2img" or "txt2img"
+        images_data: For img2img, information about the images (optional)
     """
-    if len(source_prompts) > 0 and inspiration_count > 0:
-        # Inspiration-based generation
-        inspiration_text = "\n\n".join([
-            f"Inspiration {i+1}:\nPositive: {p['prompt']['positive']}\nNegative: {p['prompt'].get('negative', '')}"
-            for i, p in enumerate(source_prompts[:inspiration_count])
-        ])
+    if generation_mode == "img2img":
+        if images_data and len(images_data) > 0:
+            return f"""Generate {generation_count} detailed, accurate prompts for the {len(images_data)} input image(s) provided.
 
-        return f"""Generate {generation_count} creative variations inspired by these prompts:
+Follow the instructions in the system prompt regarding which elements to modify and which to keep as-is.
 
-{inspiration_text}
+Each prompt should:
+1. Accurately describe all visual elements as specified
+2. Maintain photorealistic quality
+3. Be detailed and professional
+4. Follow the modification rules (if any elements are specified to be changed)
 
-Create diverse variations that:
-1. Maintain the core style and quality level
-2. Explore different subjects, compositions, or moods
-3. Use varied descriptive language
-4. Are suitable for professional image generation
+Generate {generation_count} unique prompt(s)."""
+        else:
+            return f"""Generate {generation_count} high-quality prompts for realistic photographic image generation based on the input images.
 
-Generate {generation_count} unique prompts."""
+Each prompt should be detailed, professional, and capture all visual elements accurately.
 
-    else:
-        # From-scratch generation
-        return f"""Generate {generation_count} high-quality, creative prompts for image generation.
+Generate {generation_count} unique prompt(s)."""
 
-Create diverse prompts covering different:
-1. Subjects (people, landscapes, objects, abstract, etc.)
-2. Styles (photorealistic, artistic, cinematic, etc.)
-3. Moods and atmospheres
-4. Compositions and perspectives
+    else:  # txt2img
+        return f"""Generate {generation_count} high-quality, creative prompts for realistic photographic image generation.
 
-Each prompt should be detailed, professional, and ready for image generation.
+Using the inspiration prompts and user input provided (if any), create diverse, professional prompts that:
+1. Are detailed and vivid
+2. Focus on realistic photographic elements
+3. Include appropriate quality tags
+4. Specify lighting, composition, and technical details
+5. Are varied and creative while maintaining high quality
 
 Generate {generation_count} unique prompts."""
 
@@ -249,15 +292,35 @@ async def _generate_creative_prompts(request):
 
     Body:
     {
+        // Legacy parameters (still supported)
         "source_prompts": [{id, prompt: {positive, negative}}, ...],
-        "generation_count": 5,
         "inspiration_count": 3,
-        "is_sdxl": false,
         "character_reference": "",
+
+        // New unified parameters
+        "generation_count": 5,
+        "is_sdxl": false,
         "model": "gemini-2.5-pro",
         "gemini_api_key": "",
         "grok_api_key": "",
-        "force_regenerate": false
+        "temperature": 0.9,
+        "top_p": 0.9,
+        "force_regenerate": false,
+
+        // Character likeness (NEW)
+        "character_description": "Detailed character description...",
+        "use_character_likeness": true,
+
+        // Generation mode (NEW)
+        "generation_mode": "img2img",  // or "txt2img"
+
+        // img2img parameters (NEW)
+        "images": ["base64_image_data..."],  // Images for vision models
+        "affect_elements": ["background", "outfit"],  // Which elements to modify
+
+        // txt2img parameters (NEW)
+        "random_inspiration_prompts": [{prompt, tags}, ...],  // Random library prompts
+        "user_text_input": "Custom user guidance..."
     }
 
     Returns:
@@ -269,24 +332,68 @@ async def _generate_creative_prompts(request):
     try:
         data = await request.json()
 
-        source_prompts = data.get("source_prompts", [])
+        # Core parameters
         generation_count = int(data.get("generation_count", 5))
-        inspiration_count = int(data.get("inspiration_count", 0))
         is_sdxl = bool(data.get("is_sdxl", False))
-        character_reference = data.get("character_reference", "")
         model = data.get("model", "gemini-2.5-pro")
         gemini_api_key = data.get("gemini_api_key", "")
         grok_api_key = data.get("grok_api_key", "")
-        custom_system_prompt = (data.get("system_prompt") or "").strip()
         temperature = float(data.get("temperature", 0.9))
         top_p = float(data.get("top_p", 0.9))
         temperature = max(0.0, min(2.0, temperature))
         top_p = max(0.0, min(1.0, top_p))
         force_regenerate = bool(data.get("force_regenerate", False))
 
+        # NEW: Character likeness
+        character_description = data.get("character_description", "")
+        use_character_likeness = bool(data.get("use_character_likeness", False))
+        if not use_character_likeness:
+            character_description = ""
+
+        # NEW: Generation mode
+        generation_mode = data.get("generation_mode", "img2img")
+
+        # NEW: img2img parameters
+        images = data.get("images", [])
+        affect_elements = data.get("affect_elements", [])
+
+        # NEW: txt2img parameters
+        random_inspiration_prompts = data.get("random_inspiration_prompts", [])
+        user_text_input = data.get("user_text_input", "")
+
+        # Legacy support: convert old parameters to new format
+        source_prompts = data.get("source_prompts", [])
+        inspiration_count = int(data.get("inspiration_count", 0))
+        character_reference = data.get("character_reference", "")
+
+        if character_reference and not character_description:
+            character_description = character_reference
+            use_character_likeness = True
+
+        if source_prompts and len(source_prompts) > 0 and not random_inspiration_prompts:
+            random_inspiration_prompts = source_prompts[:inspiration_count] if inspiration_count > 0 else []
+
+        # Custom system prompt override
+        custom_system_prompt = (data.get("system_prompt") or "").strip()
+
         # Build prompts
-        system_prompt = custom_system_prompt or build_system_prompt(is_sdxl, character_reference)
-        user_prompt = build_user_prompt(source_prompts, generation_count, inspiration_count)
+        if custom_system_prompt:
+            system_prompt = custom_system_prompt
+        else:
+            system_prompt = build_system_prompt(
+                is_sdxl=is_sdxl,
+                character_description=character_description,
+                generation_mode=generation_mode,
+                affect_elements=affect_elements,
+                user_text_input=user_text_input,
+                random_inspiration_prompts=random_inspiration_prompts
+            )
+
+        user_prompt = build_user_prompt(
+            generation_count=generation_count,
+            generation_mode=generation_mode,
+            images_data=images
+        )
 
         # Check cache (skip if force_regenerate is True)
         cache_key = hashlib.sha256(
@@ -300,12 +407,20 @@ async def _generate_creative_prompts(request):
             print(f"[RPG Creative API] Using cached result: {cache_key[:8]}")
             with open(cache_file, 'r', encoding='utf-8') as f:
                 prompts = json.load(f)
-                return web.json_response({"success": True, "prompts": prompts})
+                return web.json_response({"success": True, "prompts": prompts}, headers=CORS_HEADERS)
 
         if force_regenerate:
             print(f"[RPG Creative API] Force regenerate enabled - bypassing cache for {cache_key[:8]}")
 
         # Generate with appropriate API
+        print(f"[RPG Creative API] Generating {generation_count} prompts - Mode: {generation_mode}, Model: {model}")
+        if use_character_likeness:
+            print(f"[RPG Creative API] Using character likeness (description length: {len(character_description)} chars)")
+        if generation_mode == "img2img" and affect_elements:
+            print(f"[RPG Creative API] Affecting elements: {affect_elements}")
+        if generation_mode == "txt2img":
+            print(f"[RPG Creative API] Inspiration prompts: {len(random_inspiration_prompts)}, User input: {len(user_text_input)} chars")
+
         if model.startswith("gemini"):
             prompts = await generate_with_gemini(system_prompt, user_prompt, model, gemini_api_key, temperature, top_p)
         elif model.startswith("grok"):
@@ -322,6 +437,8 @@ async def _generate_creative_prompts(request):
 
     except Exception as e:
         print(f"[RPG Creative API] Error: {e}")
+        import traceback
+        traceback.print_exc()
         return web.json_response({
             "success": False,
             "error": str(e)
@@ -344,7 +461,285 @@ async def generate_creative_prompts_options(request):
     return web.Response(headers=CORS_HEADERS)
 
 
+# === Character Description Generation ===
+# In-memory cache for character descriptions
+CHARACTER_DESCRIPTION_CACHE = {}
+
+def build_character_description_prompt():
+    """Build system prompt for character description generation."""
+    return """You are an expert at analyzing images and generating detailed character descriptions for image generation prompts.
+
+Your task is to generate a comprehensive, detailed character description that can be used consistently across multiple image generation prompts.
+
+IMPORTANT: Focus on PERMANENT, CONSISTENT physical features that define the character:
+- Facial features (face shape, eyes, nose, lips, skin tone)
+- Hair (color, length, style, texture)
+- Body type and build
+- Age and ethnicity
+- Distinctive features (scars, tattoos, piercings, etc.)
+
+DO NOT include:
+- Clothing or outfit (this varies per image)
+- Background or setting
+- Pose or action
+- Temporary features (makeup, accessories)
+
+OUTPUT FORMAT: Return a single detailed paragraph (100-150 words) describing the character's permanent physical features. This description will be inserted into other prompts to ensure character consistency.
+
+Example output:
+"A young woman in her mid-20s with an athletic build and olive skin tone. She has striking almond-shaped green eyes, high cheekbones, and full lips. Her dark brown hair falls in natural waves to shoulder length with subtle copper highlights. She has a defined jawline, straight nose, and arched eyebrows. Her features suggest Mediterranean heritage. She stands approximately 5'7" with a toned, balanced physique and confident posture."
+"""
+
+async def _generate_character_description(request):
+    """
+    POST /instaraw/generate_character_description
+
+    Body:
+    {
+        "character_image": "base64_string_or_null",
+        "character_text": "manual_description_or_null",
+        "model": "gemini-2.5-pro",
+        "temperature": 0.7,
+        "top_p": 0.9,
+        "gemini_api_key": "",
+        "grok_api_key": "",
+        "force_regenerate": false
+    }
+
+    Returns:
+    {
+        "success": true,
+        "description": "Detailed character description...",
+        "cached": false,
+        "cache_key": "hash_of_inputs"
+    }
+    """
+    try:
+        data = await request.json()
+
+        character_image = data.get("character_image")
+        character_text = data.get("character_text")
+        model = data.get("model", "gemini-2.5-pro")
+        temperature = float(data.get("temperature", 0.7))
+        top_p = float(data.get("top_p", 0.9))
+        gemini_api_key = data.get("gemini_api_key", "")
+        grok_api_key = data.get("grok_api_key", "")
+        force_regenerate = bool(data.get("force_regenerate", False))
+
+        # Validation
+        if not character_image and not character_text:
+            return web.json_response({
+                "success": False,
+                "error": "Either character_image or character_text must be provided"
+            }, status=400, headers=CORS_HEADERS)
+
+        # Generate cache key
+        cache_input = character_image if character_image else character_text
+        cache_key = hashlib.sha256(f"{cache_input}_{model}".encode("utf-8")).hexdigest()
+
+        # Check cache
+        if not force_regenerate and cache_key in CHARACTER_DESCRIPTION_CACHE:
+            print(f"[RPG Character API] Using cached character description: {cache_key[:8]}")
+            return web.json_response({
+                "success": True,
+                "description": CHARACTER_DESCRIPTION_CACHE[cache_key],
+                "cached": True,
+                "cache_key": cache_key
+            }, headers=CORS_HEADERS)
+
+        # Build prompts
+        system_prompt = build_character_description_prompt()
+
+        if character_image:
+            user_prompt = "Analyze this image and generate a detailed character description following the format specified."
+        else:
+            user_prompt = f"Based on this character description, generate a more detailed, structured character description following the format specified:\n\n{character_text}"
+
+        # Generate description
+        if model.startswith("gemini"):
+            # For Gemini with image support
+            result = await generate_with_gemini(system_prompt, user_prompt, model, gemini_api_key, temperature, top_p)
+            description = result[0].get("positive", "") if isinstance(result, list) else str(result)
+        elif model.startswith("grok"):
+            result = await generate_with_grok(system_prompt, user_prompt, model, grok_api_key, temperature, top_p)
+            description = result[0].get("positive", "") if isinstance(result, list) else str(result)
+        else:
+            raise ValueError(f"Unsupported model: {model}")
+
+        # Cache the description
+        CHARACTER_DESCRIPTION_CACHE[cache_key] = description
+
+        print(f"[RPG Character API] Generated character description with {model}")
+        return web.json_response({
+            "success": True,
+            "description": description,
+            "cached": False,
+            "cache_key": cache_key
+        }, headers=CORS_HEADERS)
+
+    except Exception as e:
+        print(f"[RPG Character API] Error: {e}")
+        return web.json_response({
+            "success": False,
+            "error": str(e)
+        }, status=500, headers=CORS_HEADERS)
+
+
+# === Random Prompt Selection ===
+PROMPTS_DB_CACHE = None
+PROMPTS_DB_URL = "https://instara.s3.us-east-1.amazonaws.com/prompts.db.json"
+
+async def load_prompts_database():
+    """Load and cache the prompts database from remote URL."""
+    global PROMPTS_DB_CACHE
+
+    if PROMPTS_DB_CACHE is not None:
+        return PROMPTS_DB_CACHE
+
+    print("[RPG Prompts API] Loading prompts database from remote URL...")
+
+    try:
+        timeout = aiohttp.ClientTimeout(total=60)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(PROMPTS_DB_URL) as resp:
+                if resp.status >= 400:
+                    raise RuntimeError(f"Failed to load prompts database: HTTP {resp.status}")
+
+                data = await resp.json()
+                PROMPTS_DB_CACHE = data
+                print(f"[RPG Prompts API] Loaded {len(data)} prompts from database")
+                return data
+
+    except Exception as e:
+        print(f"[RPG Prompts API] Error loading database: {e}")
+        raise
+
+
+async def _get_random_prompts(request):
+    """
+    POST /instaraw/get_random_prompts
+
+    Body:
+    {
+        "count": 5,
+        "filters": {
+            "content_type": "person",  // optional
+            "safety_level": "sfw",     // optional
+            "shot_type": "portrait"    // optional
+        }
+    }
+
+    Returns:
+    {
+        "success": true,
+        "prompts": [
+            {
+                "id": "...",
+                "tags": ["..."],
+                "prompt": {
+                    "positive": "...",
+                    "negative": "..."
+                },
+                "classification": {...}
+            }
+        ]
+    }
+    """
+    try:
+        import random
+
+        data = await request.json()
+        count = int(data.get("count", 5))
+        filters = data.get("filters", {})
+
+        # Load database
+        prompts_db = await load_prompts_database()
+
+        # Apply filters
+        filtered_prompts = prompts_db
+
+        if "content_type" in filters and filters["content_type"]:
+            content_type = filters["content_type"]
+            filtered_prompts = [
+                p for p in filtered_prompts
+                if p.get("classification", {}).get("content_type") == content_type
+            ]
+
+        if "safety_level" in filters and filters["safety_level"]:
+            safety_level = filters["safety_level"]
+            filtered_prompts = [
+                p for p in filtered_prompts
+                if p.get("classification", {}).get("safety_level") == safety_level
+            ]
+
+        if "shot_type" in filters and filters["shot_type"]:
+            shot_type = filters["shot_type"]
+            filtered_prompts = [
+                p for p in filtered_prompts
+                if p.get("classification", {}).get("shot_type") == shot_type
+            ]
+
+        # Random selection
+        if len(filtered_prompts) == 0:
+            return web.json_response({
+                "success": False,
+                "error": "No prompts match the specified filters"
+            }, status=400, headers=CORS_HEADERS)
+
+        selected_count = min(count, len(filtered_prompts))
+        selected_prompts = random.sample(filtered_prompts, selected_count)
+
+        print(f"[RPG Prompts API] Selected {selected_count} random prompts from {len(filtered_prompts)} filtered")
+
+        return web.json_response({
+            "success": True,
+            "prompts": selected_prompts
+        }, headers=CORS_HEADERS)
+
+    except Exception as e:
+        print(f"[RPG Prompts API] Error: {e}")
+        return web.json_response({
+            "success": False,
+            "error": str(e)
+        }, status=500, headers=CORS_HEADERS)
+
+
+# === Register New Endpoints ===
+@PromptServer.instance.routes.post("/instaraw/generate_character_description")
+async def generate_character_description_endpoint(request):
+    return await _generate_character_description(request)
+
+
+@PromptServer.instance.routes.post("/instaraw/generate_character_description/")
+async def generate_character_description_endpoint_slash(request):
+    return await _generate_character_description(request)
+
+
+@PromptServer.instance.routes.options("/instaraw/generate_character_description")
+@PromptServer.instance.routes.options("/instaraw/generate_character_description/")
+async def generate_character_description_options(request):
+    return web.Response(headers=CORS_HEADERS)
+
+
+@PromptServer.instance.routes.post("/instaraw/get_random_prompts")
+async def get_random_prompts_endpoint(request):
+    return await _get_random_prompts(request)
+
+
+@PromptServer.instance.routes.post("/instaraw/get_random_prompts/")
+async def get_random_prompts_endpoint_slash(request):
+    return await _get_random_prompts(request)
+
+
+@PromptServer.instance.routes.options("/instaraw/get_random_prompts")
+@PromptServer.instance.routes.options("/instaraw/get_random_prompts/")
+async def get_random_prompts_options(request):
+    return web.Response(headers=CORS_HEADERS)
+
+
 print("[RPG Creative API] Endpoint registered: POST /instaraw/generate_creative_prompts")
+print("[RPG Character API] Endpoint registered: POST /instaraw/generate_character_description")
+print("[RPG Prompts API] Endpoint registered: POST /instaraw/get_random_prompts")
 
 # Add these lines to the end of the file
 NODE_CLASS_MAPPINGS = {}
