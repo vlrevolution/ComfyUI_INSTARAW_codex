@@ -61,27 +61,32 @@
 }
 
 .instaraw-rpg-kpi {
-	flex: 1 1 120px;
+	flex: 1 1 100px;
 	border: 1px solid rgba(255, 255, 255, 0.08);
 	background: rgba(255, 255, 255, 0.02);
 	border-radius: 4px;
-	padding: 12px;
+	padding: 10px 14px;
 	display: flex;
 	flex-direction: column;
-	gap: 4px;
-	min-width: 120px;
+	justify-content: center;
+	align-items: center;
+	gap: 2px;
+	min-width: 100px;
 }
 
 .instaraw-rpg-kpi span {
-	font-size: 11px;
+	font-size: 10px;
 	text-transform: uppercase;
+	letter-spacing: 0.5px;
 	color: rgba(249, 250, 251, 0.5);
+	font-weight: 500;
 }
 
 .instaraw-rpg-kpi strong {
-	font-size: 18px;
-	font-weight: 600;
-	color: #f9fafb;
+	font-size: 20px;
+	font-weight: 700;
+	color: #a78bfa;
+	font-variant-numeric: tabular-nums;
 }
 
 /* === Header & Tabs === */
@@ -1260,16 +1265,18 @@
 .instaraw-rpg-stat-badge {
 	background: rgba(167, 139, 250, 0.2);
 	color: #c4b5fd;
-	padding: 8px 16px;
+	padding: 6px 14px;
 	border-radius: 4px;
-	font-size: 13px;
+	font-size: 12px;
 	font-weight: 600;
+	white-space: nowrap;
 }
 
 .instaraw-rpg-stat-label {
-	font-size: 12px;
+	font-size: 11px;
 	color: rgba(249, 250, 251, 0.7);
 	font-weight: 500;
+	white-space: nowrap;
 }
 
 /* === Scrollbar Styling === */

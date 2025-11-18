@@ -77,13 +77,17 @@ def _apply_chromatic_aberration(img: np.ndarray, strength=1.0, seed=None):
     strength is in pixels (float). Uses cv2.warpAffine if available; integer
     fallback uses np.roll.
     """
+    # Early return if no chromatic aberration should be applied
+    if strength <= 0:
+        return img
+
     if seed is not None:
         rng = np.random.default_rng(seed)
     else:
         rng = np.random.default_rng()
 
     h, w = img.shape[:2]
-    max_shift = max(1.0, strength)
+    max_shift = strength
     # small random subpixel shift sampled from normal distribution
     shift_r = rng.normal(loc=0.0, scale=max_shift * 0.6)
     shift_b = rng.normal(loc=0.0, scale=max_shift * 0.6)
@@ -129,21 +133,34 @@ def _add_poisson_gaussian_noise(img: np.ndarray, iso_scale=1.0, read_noise_std=2
     iso_scale scales the signal before Poisson sampling (higher -> more Poisson),
     read_noise_std is the sigma (in DN) of additive Gaussian read noise.
     """
+    # Early return if no noise should be applied
+    if iso_scale <= 0 and read_noise_std <= 0:
+        return img
+
     if seed is not None:
         rng = np.random.default_rng(seed)
     else:
         rng = np.random.default_rng()
 
     img_f = img.astype(np.float32)
-    # scale to simulate exposure/iso
-    scaled = img_f * iso_scale
-    # Poisson: we need integer counts; scale to a reasonable photon budget
-    # choose scale so that typical pixel values map to ~[0..2000] photons
-    photon_scale = 4.0
-    lam = np.clip(scaled * photon_scale, 0, 1e6)
-    noisy = rng.poisson(lam).astype(np.float32) / photon_scale
-    # add read noise
-    noisy += rng.normal(loc=0.0, scale=read_noise_std, size=noisy.shape)
+
+    # If iso_scale is valid, apply Poisson noise
+    if iso_scale > 0:
+        # scale to simulate exposure/iso
+        scaled = img_f * iso_scale
+        # Poisson: we need integer counts; scale to a reasonable photon budget
+        # choose scale so that typical pixel values map to ~[0..2000] photons
+        photon_scale = 4.0
+        lam = np.clip(scaled * photon_scale, 0, 1e6)
+        noisy = rng.poisson(lam).astype(np.float32) / photon_scale
+    else:
+        # Skip Poisson noise if iso_scale is 0 or negative
+        noisy = img_f.copy()
+
+    # Add read noise if specified
+    if read_noise_std > 0:
+        noisy += rng.normal(loc=0.0, scale=read_noise_std, size=noisy.shape)
+
     noisy = np.clip(noisy, 0, 255).astype(np.uint8)
     return noisy
 

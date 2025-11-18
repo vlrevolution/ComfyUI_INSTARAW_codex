@@ -361,15 +361,15 @@ app.registerExtension({
 							</div>
 							<div class="instaraw-rpg-kpi-row">
 								<div class="instaraw-rpg-kpi">
-									<span>Prompt Queue</span>
+									<span>Queue</span>
 									<strong>${promptQueue.length}</strong>
 								</div>
 								<div class="instaraw-rpg-kpi">
-									<span>Total Generations</span>
+									<span>Generations</span>
 									<strong>${totalGenerations}</strong>
 								</div>
 								<div class="instaraw-rpg-kpi">
-									<span>Linked Images</span>
+									<span>Images</span>
 									<strong>${linkedImages}</strong>
 								</div>
 							</div>
@@ -393,9 +393,9 @@ app.registerExtension({
 
 						<div class="instaraw-rpg-footer">
 							<div class="instaraw-rpg-stats">
-								<span class="instaraw-rpg-stat-badge">Total Generations: ${totalGenerations}</span>
-								<span class="instaraw-rpg-stat-label">Mode: ${resolvedMode}</span>
-								${node._linkedAILNodeId ? `<span class="instaraw-rpg-stat-label">Linked AIL: Node #${node._linkedAILNodeId}</span>` : `<span class="instaraw-rpg-stat-label">No Advanced Loader linked</span>`}
+								<span class="instaraw-rpg-stat-badge">Gen: ${totalGenerations}</span>
+								<span class="instaraw-rpg-stat-label">${resolvedMode}</span>
+								${node._linkedAILNodeId ? `<span class="instaraw-rpg-stat-label">AIL #${node._linkedAILNodeId}</span>` : `<span class="instaraw-rpg-stat-label">No AIL</span>`}
 							</div>
 						</div>
 					`;

@@ -224,7 +224,7 @@ class INSTARAW_SynthesizeAuthenticMetadata:
                     del final_tags[key]
 
             # 5. Synthesize GPS based on requested mode
-            bounds = None
+            city_data = None
             if location_synthesis == "From Profile":
                 pass
             elif location_synthesis == "Synthesize Random (Any City)":
@@ -232,23 +232,35 @@ class INSTARAW_SynthesizeAuthenticMetadata:
                 if all_cities:
                     random_city_str = rng.choice(all_cities)
                     city_name, country_name = [x.strip() for x in random_city_str.split(',')]
-                    bounds = self.get_random_city_from_country(country_name, rng)
+                    city_data = self.get_random_city_from_country(country_name, rng)
             elif location_synthesis.startswith("Synthesize Random ("):
                 country_name = location_synthesis[19:-1]  # between '(' and ')'
-                bounds = self.get_random_city_from_country(country_name, rng)
+                # Fix: Handle "US City" as "United States"
+                if country_name == "US City":
+                    country_name = "United States"
+                city_data = self.get_random_city_from_country(country_name, rng)
             else:
                 # Specific "City, Country"
                 city_name, country_name = [x.strip() for x in location_synthesis.split(',')]
                 for region, countries in self._locations_data.items():
                     if country_name in countries:
-                        for city_data in countries[country_name]:
-                            if city_data['city'] == city_name:
-                                bounds = city_data
+                        for city_data_item in countries[country_name]:
+                            if city_data_item['city'] == city_name:
+                                city_data = city_data_item
                                 break
 
-            if bounds:
-                lat = rng.uniform(bounds['lat'][0], bounds['lat'][1])
-                lon = rng.uniform(bounds['lon'][0], bounds['lon'][1])
+            if city_data:
+                # Use jitter around city center instead of uniform distribution across bounding box
+                # This keeps coordinates closer to actual city and reduces water hits
+                center_lat = (city_data['lat'][0] + city_data['lat'][1]) / 2
+                center_lon = (city_data['lon'][0] + city_data['lon'][1]) / 2
+
+                # Add small random jitter (±0.02 degrees ≈ 2.2km)
+                # Using Gaussian distribution for more natural clustering around center
+                jitter_amount = 0.02
+                lat = center_lat + rng.gauss(0, jitter_amount / 2)
+                lon = center_lon + rng.gauss(0, jitter_amount / 2)
+
                 final_tags.update({
                     "EXIF:GPSLatitude": abs(lat),
                     "EXIF:GPSLatitudeRef": "N" if lat >= 0 else "S",

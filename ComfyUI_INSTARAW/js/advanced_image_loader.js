@@ -17,10 +17,18 @@ app.registerExtension({
 				if (!this.properties.batch_data) {
 					this.properties.batch_data = JSON.stringify({ images: [], order: [], total_count: 0 });
 				}
+				if (!this.properties.txt2img_data_backup) {
+					this.properties.txt2img_data_backup = JSON.stringify({ latents: [], order: [], total_count: 0 });
+				}
+				if (!this.properties.img2img_data_backup) {
+					this.properties.img2img_data_backup = JSON.stringify({ images: [], order: [], total_count: 0 });
+				}
 
 				const node = this;
 				let cachedHeight = 300;
 				let isUpdatingHeight = false;
+				let currentDetectedMode = null; // Track detected mode to minimize re-renders
+				let modeCheckInterval = null; // For periodic mode checking
 
 				const container = document.createElement("div");
 				container.className = "instaraw-adv-loader-container";
@@ -61,7 +69,196 @@ app.registerExtension({
 					}
 				};
 
+				/**
+				 * Computes aspect ratio node outputs locally (for multi-output nodes).
+				 * Aspect ratio nodes compute width/height in Python, but we replicate that logic here
+				 * to properly read values from the correct output slot.
+				 */
+				const getAspectRatioOutput = (aspectRatioNode, slotIndex) => {
+					// Read the dropdown selection from the aspect ratio node
+					const selection = aspectRatioNode.widgets?.[0]?.value;
+					if (!selection) {
+						console.warn(`[INSTARAW AIL ${node.id}] Aspect ratio node has no selection`);
+						return null;
+					}
+
+					// Aspect ratio mappings (must match Python ASPECT_RATIOS dicts exactly)
+					const WAN_RATIOS = {
+						"3:4 (Portrait)": { width: 720, height: 960, label: "3:4" },
+						"9:16 (Tall Portrait)": { width: 540, height: 960, label: "9:16" },
+						"1:1 (Square)": { width: 960, height: 960, label: "1:1" },
+						"16:9 (Landscape)": { width: 960, height: 540, label: "16:9" }
+					};
+
+					const SDXL_RATIOS = {
+						"3:4 (Portrait)": { width: 896, height: 1152, label: "3:4" },
+						"9:16 (Tall Portrait)": { width: 768, height: 1344, label: "9:16" },
+						"1:1 (Square)": { width: 1024, height: 1024, label: "1:1" },
+						"16:9 (Landscape)": { width: 1344, height: 768, label: "16:9" }
+					};
+
+					const ratios = aspectRatioNode.type === "INSTARAW_WANAspectRatio"
+						? WAN_RATIOS
+						: SDXL_RATIOS;
+
+					const config = ratios[selection];
+					if (!config) {
+						console.warn(`[INSTARAW AIL ${node.id}] Unknown aspect ratio selection: ${selection}`);
+						return null;
+					}
+
+					console.log(`[INSTARAW AIL ${node.id}] Aspect ratio node output:`, {
+						selection,
+						slotIndex,
+						type: aspectRatioNode.type,
+						value: slotIndex === 0 ? config.width : slotIndex === 1 ? config.height : config.label
+					});
+
+					// Return based on output slot (0=width, 1=height, 2=aspect_label)
+					if (slotIndex === 0) return config.width;
+					if (slotIndex === 1) return config.height;
+					if (slotIndex === 2) return config.label;
+
+					return null;
+				};
+
+				/**
+				 * Retrieves the final value of an input by traversing connected nodes.
+				 * Enhanced to properly handle multi-output nodes like aspect ratio nodes.
+				 */
+				const getFinalInputValue = (inputName, defaultValue) => {
+					if (!node.inputs || node.inputs.length === 0) {
+						const widget = node.widgets?.find(w => w.name === inputName);
+						return widget ? widget.value : defaultValue;
+					}
+
+					const input = node.inputs.find(i => i.name === inputName);
+					if (!input || input.link == null) {
+						const widget = node.widgets?.find(w => w.name === inputName);
+						return widget ? widget.value : defaultValue;
+					}
+
+					const link = app.graph.links[input.link];
+					if (!link) return defaultValue;
+
+					const originNode = app.graph.getNodeById(link.origin_id);
+					if (!originNode) return defaultValue;
+
+					// SPECIAL HANDLING: For aspect ratio nodes, compute the output locally
+					// because they have multiple outputs and don't store computed values in widgets
+					if (originNode.type === "INSTARAW_WANAspectRatio" ||
+					    originNode.type === "INSTARAW_SDXLAspectRatio") {
+						const output = getAspectRatioOutput(originNode, link.origin_slot);
+						if (output !== null) return output;
+					}
+
+					// For other nodes, read from widgets
+					if (originNode.widgets && originNode.widgets.length > 0) {
+						return originNode.widgets[0].value;
+					}
+
+					if (originNode.properties && originNode.properties.value !== undefined) {
+						return originNode.properties.value;
+					}
+
+					return defaultValue;
+				};
+
+				/**
+				 * Detects if we're in txt2img mode by reading enable_img2img from connected nodes.
+				 * Returns true for txt2img mode, false for img2img mode.
+				 */
+				const isTxt2ImgMode = () => {
+					const enableImg2Img = getFinalInputValue("enable_img2img", true);
+					console.log(`[INSTARAW AIL ${node.id}] enable_img2img value:`, enableImg2Img, `(type: ${typeof enableImg2Img})`);
+					const result = enableImg2Img === false || enableImg2Img === "false";
+					console.log(`[INSTARAW AIL ${node.id}] isTxt2ImgMode result:`, result);
+					return result;
+				};
+
+				/**
+				 * Gets width, height, and aspect_label from connected nodes for txt2img mode.
+				 */
+				const getTxt2ImgDimensions = () => {
+					console.log(`[INSTARAW AIL ${node.id}] === Reading dimensions from connected nodes ===`);
+
+					const widthRaw = getFinalInputValue("width", 960);
+					const heightRaw = getFinalInputValue("height", 960);
+					const aspect_label_raw = getFinalInputValue("aspect_label", null);
+
+					console.log(`[INSTARAW AIL ${node.id}] Raw values:`, { widthRaw, heightRaw, aspect_label_raw });
+
+					const width = parseInt(widthRaw) || 960;
+					const height = parseInt(heightRaw) || 960;
+					const aspect_label = aspect_label_raw || getAspectLabel(width, height);
+
+					console.log(`[INSTARAW AIL ${node.id}] Final dimensions:`, { width, height, aspect_label });
+					console.log(`[INSTARAW AIL ${node.id}] Expected tensor size: ${width}×${height} (${(width * height / 1000000).toFixed(2)}MP)`);
+
+					return { width, height, aspect_label };
+				};
+
+				/**
+				 * Generates a simple UUID v4.
+				 */
+				const generateUUID = () => {
+					return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+						const r = Math.random() * 16 | 0;
+						const v = c === 'x' ? r : (r & 0x3 | 0x8);
+						return v.toString(16);
+					});
+				};
+
+				/**
+				 * Calculates aspect ratio label from width and height.
+				 */
+				const getAspectLabel = (width, height) => {
+					const gcd = (a, b) => b === 0 ? a : gcd(b, a % b);
+					const divisor = gcd(width, height);
+					const w = width / divisor;
+					const h = height / divisor;
+
+					// Common aspect ratios
+					if (w === h) return "1:1";
+					if (w === 3 && h === 4) return "3:4";
+					if (w === 4 && h === 3) return "4:3";
+					if (w === 9 && h === 16) return "9:16";
+					if (w === 16 && h === 9) return "16:9";
+					if (w === 2 && h === 3) return "2:3";
+					if (w === 3 && h === 2) return "3:2";
+
+					return `${w}:${h}`;
+				};
+
 				const renderGallery = () => {
+					const detectedMode = isTxt2ImgMode();
+					console.log(`[INSTARAW AIL ${node.id}] renderGallery - currentDetectedMode:`, currentDetectedMode, `detectedMode:`, detectedMode);
+
+					// Handle mode switching
+					if (currentDetectedMode !== null && currentDetectedMode !== detectedMode) {
+						console.log(`[INSTARAW AIL ${node.id}] MODE SWITCH DETECTED! Switching to ${detectedMode ? 'txt2img' : 'img2img'}`);
+						if (detectedMode) {
+							// Switching to txt2img mode
+							node.properties.img2img_data_backup = node.properties.batch_data;
+							node.properties.batch_data = node.properties.txt2img_data_backup || JSON.stringify({ latents: [], order: [], total_count: 0 });
+						} else {
+							// Switching to img2img mode
+							node.properties.txt2img_data_backup = node.properties.batch_data;
+							node.properties.batch_data = node.properties.img2img_data_backup || JSON.stringify({ images: [], order: [], total_count: 0 });
+						}
+						syncBatchDataWidget();
+					}
+					currentDetectedMode = detectedMode;
+
+					console.log(`[INSTARAW AIL ${node.id}] Rendering ${detectedMode ? 'txt2img' : 'img2img'} gallery`);
+					if (detectedMode) {
+						renderTxt2ImgGallery();
+					} else {
+						renderImg2ImgGallery();
+					}
+				};
+
+				const renderImg2ImgGallery = () => {
 					const batchData = JSON.parse(node.properties.batch_data || "{}");
 					const images = batchData.images || [];
 					const order = batchData.order || [];
@@ -71,6 +268,9 @@ app.registerExtension({
 					const currentIndex = node._processingIndex !== undefined ? node._processingIndex : batchIndexWidget?.value || 0;
 
 					container.innerHTML = `
+                        <div class="instaraw-adv-loader-mode-indicator">
+                            <span class="instaraw-adv-loader-mode-badge instaraw-adv-loader-mode-img2img">🖼️ IMG2IMG MODE</span>
+                        </div>
                         <div class="instaraw-adv-loader-mode-selector">
                             <label>Mode:</label>
                             <select class="instaraw-adv-loader-mode-dropdown">
@@ -132,6 +332,7 @@ app.registerExtension({
 					window.dispatchEvent(new CustomEvent("INSTARAW_AIL_UPDATED", {
 						detail: {
 							nodeId: node.id,
+							mode: "img2img",
 							images: order.map(imgId => {
 								const img = images.find(i => i.id === imgId);
 								if (!img) return null;
@@ -141,6 +342,292 @@ app.registerExtension({
 							total: batchData.total_count || 0
 						}
 					}));
+				};
+
+				const renderTxt2ImgGallery = () => {
+					const batchData = JSON.parse(node.properties.batch_data || "{}");
+					const latents = batchData.latents || [];
+					const order = batchData.order || [];
+					const modeWidget = node.widgets?.find((w) => w.name === "mode");
+					const currentMode = modeWidget?.value || "Batch Tensor";
+					const batchIndexWidget = node.widgets?.find((w) => w.name === "batch_index");
+					const currentIndex = node._processingIndex !== undefined ? node._processingIndex : batchIndexWidget?.value || 0;
+					const dimensions = getTxt2ImgDimensions();
+
+					// Debug: Log dimensions for debugging
+					console.log(`[INSTARAW AIL ${node.id}] renderTxt2ImgGallery - dimensions:`, dimensions);
+
+					container.innerHTML = `
+                        <div class="instaraw-adv-loader-mode-indicator">
+                            <span class="instaraw-adv-loader-mode-badge instaraw-adv-loader-mode-txt2img">🎨 TXT2IMG MODE</span>
+                        </div>
+                        <div class="instaraw-adv-loader-mode-selector">
+                            <label>Mode:</label>
+                            <select class="instaraw-adv-loader-mode-dropdown">
+                                <option value="Batch Tensor" ${currentMode === "Batch Tensor" ? "selected" : ""}>🎯 Batch Tensor</option>
+                                <option value="Sequential" ${currentMode === "Sequential" ? "selected" : ""}>📑 Sequential</option>
+                            </select>
+                            ${currentMode === "Sequential" ? `<button class="instaraw-adv-loader-queue-all-btn" title="Queue all latents">🎬 Queue All</button>` : ""}
+                        </div>
+                        ${currentMode === "Sequential" ? `<div class="instaraw-adv-loader-progress"><span class="instaraw-adv-loader-progress-label">Current Index:</span><span class="instaraw-adv-loader-progress-value">${currentIndex} / ${batchData.total_count || 0}</span></div>` : ""}
+                        <div class="instaraw-adv-loader-header">
+                            <div class="instaraw-adv-loader-actions">
+                                <button class="instaraw-adv-loader-add-latent-btn" title="Add empty latent">🖼️ Add Empty Latent</button>
+                                <div class="instaraw-adv-loader-batch-add-controls">
+                                    <input type="number" class="instaraw-adv-loader-batch-count-input" value="5" min="1" max="100" />
+                                    <button class="instaraw-adv-loader-batch-add-btn" title="Batch add empty latents">📦 Add N</button>
+                                </div>
+                                ${latents.length > 0 ? `<button class="instaraw-adv-loader-delete-all-btn" title="Delete all latents">🗑️ Delete All</button>` : ""}
+                            </div>
+                            <div class="instaraw-adv-loader-stats">
+                                <span class="instaraw-adv-loader-count">${latents.length} latent${latents.length !== 1 ? "s" : ""}</span>
+                                <span class="instaraw-adv-loader-total">Total: ${batchData.total_count || 0} (with repeats)</span>
+                            </div>
+                        </div>
+                        <div class="instaraw-adv-loader-gallery">
+                            ${order.length === 0 ? `<div class="instaraw-adv-loader-empty"><p>No latents added</p><p class="instaraw-adv-loader-hint">Click "Add Empty Latent" to get started (txt2img mode)</p></div>` : (() => {
+								let currentIdx = 0;
+								return order.map((latentId) => {
+									const latent = latents.find((l) => l.id === latentId);
+									if (!latent) return "";
+
+									// Debug: Log what latent contains
+									console.log(`[INSTARAW AIL ${node.id}] Rendering latent:`, latent);
+
+									const repeatCount = latent.repeat_count || 1;
+									const startIdx = currentIdx;
+									const endIdx = currentIdx + repeatCount - 1;
+									currentIdx += repeatCount;
+									const isActive = currentMode === "Sequential" && currentIndex >= startIdx && currentIndex <= endIdx;
+									const isPast = currentMode === "Sequential" && currentIndex > endIdx;
+									const isProcessing = node._isProcessing && isActive;
+
+									// Ensure width and height are integers
+									const width = parseInt(latent.width) || 960;
+									const height = parseInt(latent.height) || 960;
+									const aspectRatio = width / height;
+									const aspectLabel = latent.aspect_label || getAspectLabel(width, height);
+
+									return `<div class="instaraw-adv-loader-item ${isActive ? "instaraw-adv-loader-item-active" : ""} ${isPast ? "instaraw-adv-loader-item-done" : ""} ${isProcessing ? "instaraw-adv-loader-item-processing" : ""}" data-id="${latent.id}" draggable="true">
+                                        ${currentMode === "Sequential" ? `<div class="instaraw-adv-loader-index-badge">${repeatCount === 1 ? `#${startIdx}` : `#${startIdx}-${endIdx}`}</div>` : ""}
+                                        <div class="instaraw-adv-loader-latent-thumb">
+                                            <div class="instaraw-adv-loader-aspect-preview" style="aspect-ratio: ${aspectRatio};">
+                                                <div class="instaraw-adv-loader-aspect-content">
+                                                    <div style="font-size: 24px;">📐</div>
+                                                    <div style="font-size: 11px; font-weight: 600;">${aspectLabel}</div>
+                                                </div>
+                                            </div>
+                                            ${isProcessing ? '<div class="instaraw-adv-loader-processing-indicator">⚡ PROCESSING...</div>' : isActive ? '<div class="instaraw-adv-loader-active-indicator">▶ NEXT</div>' : ""}
+                                            ${isPast ? '<div class="instaraw-adv-loader-done-indicator">✓</div>' : ""}
+                                        </div>
+                                        <div class="instaraw-adv-loader-controls">
+                                            <label>×</label>
+                                            <input type="number" class="instaraw-adv-loader-repeat-input" value="${latent.repeat_count || 1}" min="1" max="99" data-id="${latent.id}" />
+                                            <button class="instaraw-adv-loader-delete-btn" data-id="${latent.id}" title="Delete">×</button>
+                                        </div>
+                                        <div class="instaraw-adv-loader-info">
+                                            <div class="instaraw-adv-loader-filename" title="${latent.id}">Latent ${latent.id.substring(0, 8)}</div>
+                                            <div class="instaraw-adv-loader-dimensions">${width}×${height}</div>
+                                        </div>
+                                    </div>`;
+								}).join("");
+							})()}
+                        </div>`;
+					setupTxt2ImgEventHandlers();
+					setupDragAndDrop();
+					updateCachedHeight();
+
+					// Dispatch update event for other nodes (e.g., RPG)
+					window.dispatchEvent(new CustomEvent("INSTARAW_AIL_UPDATED", {
+						detail: {
+							nodeId: node.id,
+							mode: "txt2img",
+							latents: order.map(latentId => {
+								const latent = latents.find(l => l.id === latentId);
+								if (!latent) return null;
+								return {
+									id: latent.id,
+									width: latent.width,
+									height: latent.height,
+									aspect_label: latent.aspect_label,
+									index: order.indexOf(latentId)
+								};
+							}).filter(l => l !== null),
+							total: batchData.total_count || 0
+						}
+					}));
+				};
+
+				const addEmptyLatent = () => {
+					const dimensions = getTxt2ImgDimensions();
+					const batchData = JSON.parse(node.properties.batch_data || "{}");
+					batchData.latents = batchData.latents || [];
+					batchData.order = batchData.order || [];
+
+					// Check for aspect ratio mismatch
+					if (batchData.latents.length > 0) {
+						const existingAspect = batchData.latents[0].aspect_label;
+						if (existingAspect !== dimensions.aspect_label) {
+							const confirmed = confirm(
+								`Current batch has ${existingAspect} latents.\n` +
+								`Switch to ${dimensions.aspect_label}?\n\n` +
+								`This will clear all existing latents.`
+							);
+							if (!confirmed) {
+								return; // Abort
+							}
+							// Clear existing latents
+							batchData.latents = [];
+							batchData.order = [];
+						}
+					}
+
+					const newLatent = {
+						id: generateUUID(),
+						width: dimensions.width,
+						height: dimensions.height,
+						repeat_count: 1,
+						aspect_label: dimensions.aspect_label  // Use aspect_label from connected node
+					};
+
+					console.log(`[INSTARAW AIL ${node.id}] Adding latent:`, newLatent);
+
+					batchData.latents.push(newLatent);
+					batchData.order.push(newLatent.id);
+					batchData.total_count = batchData.latents.reduce((sum, l) => sum + (l.repeat_count || 1), 0);
+
+					node.properties.batch_data = JSON.stringify(batchData);
+					syncBatchDataWidget();
+					renderGallery();
+				};
+
+				const batchAddLatents = (count) => {
+					const dimensions = getTxt2ImgDimensions();
+					const batchData = JSON.parse(node.properties.batch_data || "{}");
+					batchData.latents = batchData.latents || [];
+					batchData.order = batchData.order || [];
+
+					// Check for aspect ratio mismatch
+					if (batchData.latents.length > 0) {
+						const existingAspect = batchData.latents[0].aspect_label;
+						if (existingAspect !== dimensions.aspect_label) {
+							const confirmed = confirm(
+								`Current batch has ${existingAspect} latents.\n` +
+								`Switch to ${dimensions.aspect_label}?\n\n` +
+								`This will clear all existing latents.`
+							);
+							if (!confirmed) {
+								return; // Abort
+							}
+							// Clear existing latents
+							batchData.latents = [];
+							batchData.order = [];
+						}
+					}
+
+					console.log(`[INSTARAW AIL ${node.id}] Batch adding ${count} latents with dimensions:`, dimensions);
+
+					for (let i = 0; i < count; i++) {
+						const newLatent = {
+							id: generateUUID(),
+							width: dimensions.width,
+							height: dimensions.height,
+							repeat_count: 1,
+							aspect_label: dimensions.aspect_label  // Use aspect_label from connected node
+						};
+						batchData.latents.push(newLatent);
+						batchData.order.push(newLatent.id);
+					}
+
+					batchData.total_count = batchData.latents.reduce((sum, l) => sum + (l.repeat_count || 1), 0);
+					node.properties.batch_data = JSON.stringify(batchData);
+					syncBatchDataWidget();
+					renderGallery();
+				};
+
+				const deleteLatent = (latentId) => {
+					if (!confirm("Delete this latent?")) return;
+					const batchData = JSON.parse(node.properties.batch_data || "{}");
+					batchData.latents = batchData.latents.filter((l) => l.id !== latentId);
+					batchData.order = batchData.order.filter((id) => id !== latentId);
+					batchData.total_count = batchData.latents.reduce((sum, l) => sum + (l.repeat_count || 1), 0);
+					node.properties.batch_data = JSON.stringify(batchData);
+					syncBatchDataWidget();
+					renderGallery();
+				};
+
+				const deleteAllLatents = () => {
+					const batchData = JSON.parse(node.properties.batch_data || "{}");
+					const latentCount = batchData.latents?.length || 0;
+					if (latentCount === 0 || !confirm(`Delete all ${latentCount} latent${latentCount !== 1 ? "s" : ""}?`)) return;
+					node.properties.batch_data = JSON.stringify({ latents: [], order: [], total_count: 0 });
+					syncBatchDataWidget();
+					renderGallery();
+				};
+
+				const updateLatentRepeatCount = (latentId, newCount) => {
+					const batchData = JSON.parse(node.properties.batch_data || "{}");
+					const latent = batchData.latents.find((l) => l.id === latentId);
+					if (latent) {
+						latent.repeat_count = Math.max(1, Math.min(99, newCount));
+						batchData.total_count = batchData.latents.reduce((sum, l) => sum + (l.repeat_count || 1), 0);
+						node.properties.batch_data = JSON.stringify(batchData);
+						syncBatchDataWidget();
+						const statsEl = container.querySelector(".instaraw-adv-loader-total");
+						if (statsEl) statsEl.textContent = `Total: ${batchData.total_count} (with repeats)`;
+					}
+				};
+
+				const queueAllLatents = async () => {
+					const batchData = JSON.parse(node.properties.batch_data || "{}");
+					const totalCount = batchData.total_count || 0;
+					if (totalCount === 0 || !confirm(`Queue ${totalCount} workflow executions?`)) return;
+					try {
+						const prompt = await app.graphToPrompt();
+						for (let i = 0; i < totalCount; i++) {
+							const promptCopy = JSON.parse(JSON.stringify(prompt.output));
+							if (promptCopy[node.id] && promptCopy[node.id].inputs) {
+								promptCopy[node.id].inputs.batch_index = i;
+							}
+							await fetch("/prompt", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: promptCopy, client_id: app.clientId }) });
+							if (i < totalCount - 1) await new Promise((resolve) => setTimeout(resolve, 50));
+						}
+					} catch (error) {
+						alert(`Queue error: ${error.message}`);
+					}
+				};
+
+				const setupTxt2ImgEventHandlers = () => {
+					const modeDropdown = container.querySelector(".instaraw-adv-loader-mode-dropdown");
+					if (modeDropdown)
+						modeDropdown.onchange = (e) => {
+							const modeWidget = node.widgets?.find((w) => w.name === "mode");
+							if (modeWidget) {
+								modeWidget.value = e.target.value;
+								renderGallery();
+							}
+						};
+					const queueAllBtn = container.querySelector(".instaraw-adv-loader-queue-all-btn");
+					if (queueAllBtn) queueAllBtn.onclick = queueAllLatents;
+					const addLatentBtn = container.querySelector(".instaraw-adv-loader-add-latent-btn");
+					if (addLatentBtn) addLatentBtn.onclick = addEmptyLatent;
+					const batchAddBtn = container.querySelector(".instaraw-adv-loader-batch-add-btn");
+					if (batchAddBtn) {
+						batchAddBtn.onclick = () => {
+							const countInput = container.querySelector(".instaraw-adv-loader-batch-count-input");
+							const count = parseInt(countInput?.value || 5);
+							if (count > 0 && count <= 100) {
+								batchAddLatents(count);
+							}
+						};
+					}
+					const deleteAllBtn = container.querySelector(".instaraw-adv-loader-delete-all-btn");
+					if (deleteAllBtn) deleteAllBtn.onclick = deleteAllLatents;
+					container.querySelectorAll(".instaraw-adv-loader-delete-btn").forEach((btn) => (btn.onclick = (e) => { e.stopPropagation(); deleteLatent(btn.dataset.id); }));
+					container.querySelectorAll(".instaraw-adv-loader-repeat-input").forEach((input) => {
+						input.onchange = (e) => updateLatentRepeatCount(input.dataset.id, parseInt(input.value) || 1);
+						input.onmousedown = (e) => e.stopPropagation();
+					});
 				};
 
 				const handleFileSelect = async (e) => {
@@ -321,6 +808,42 @@ app.registerExtension({
 				node._updateCachedHeight = updateCachedHeight;
 				node._renderGallery = renderGallery;
 
+				// Add widget change callbacks to automatically refresh
+				const setupWidgetCallbacks = () => {
+					const modeWidget = node.widgets?.find((w) => w.name === "mode");
+					if (modeWidget && !modeWidget._instaraw_callback_added) {
+						const originalCallback = modeWidget.callback;
+						modeWidget.callback = function() {
+							if (originalCallback) originalCallback.apply(this, arguments);
+							renderGallery();
+						};
+						modeWidget._instaraw_callback_added = true;
+					}
+
+					const batchIndexWidget = node.widgets?.find((w) => w.name === "batch_index");
+					if (batchIndexWidget && !batchIndexWidget._instaraw_callback_added) {
+						const originalCallback = batchIndexWidget.callback;
+						batchIndexWidget.callback = function() {
+							if (originalCallback) originalCallback.apply(this, arguments);
+							renderGallery();
+						};
+						batchIndexWidget._instaraw_callback_added = true;
+					}
+				};
+
+				// Periodic mode check - checks every 2 seconds if mode changed
+				const startModeCheck = () => {
+					if (modeCheckInterval) clearInterval(modeCheckInterval);
+					modeCheckInterval = setInterval(() => {
+						const detectedMode = isTxt2ImgMode();
+						if (currentDetectedMode !== null && currentDetectedMode !== detectedMode) {
+							renderGallery();
+						}
+					}, 2000);
+					// Store on node for cleanup
+					node._modeCheckInterval = modeCheckInterval;
+				};
+
 				const handleBatchUpdate = (event) => {
 					const data = event.detail;
 					if (data && data.node_id == node.id) {
@@ -338,6 +861,8 @@ app.registerExtension({
 					const batchIndexWidget = node.widgets?.find((w) => w.name === "batch_index");
 					if (batchIndexWidget && batchIndexWidget.value !== undefined) node._processingIndex = batchIndexWidget.value;
 					syncBatchDataWidget();
+					setupWidgetCallbacks();
+					startModeCheck();
 					renderGallery();
 				}, 100);
 			};
@@ -361,6 +886,16 @@ app.registerExtension({
 					if (batchIndexWidget && batchIndexWidget.value !== undefined) this._processingIndex = batchIndexWidget.value;
 					if (this._renderGallery) this._renderGallery();
 				}, 200);
+			};
+
+			const onRemoved = nodeType.prototype.onRemoved;
+			nodeType.prototype.onRemoved = function () {
+				// Clean up the periodic mode check interval
+				if (this._modeCheckInterval) {
+					clearInterval(this._modeCheckInterval);
+					this._modeCheckInterval = null;
+				}
+				onRemoved?.apply(this, arguments);
 			};
 		}
 	},

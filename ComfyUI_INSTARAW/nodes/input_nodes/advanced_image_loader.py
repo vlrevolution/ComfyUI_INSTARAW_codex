@@ -37,6 +37,10 @@ class INSTARAW_AdvancedImageLoader:
             "optional": {
                 "resize_mode": (["Center Crop", "Letterbox", "Stretch", "Fit to Largest"], {"default": "Center Crop"}),
                 "batch_index": ("INT", {"default": 0, "min": 0, "max": 9999, "step": 1}),
+                "width": ("INT", {"default": 512, "min": 64, "max": 8192, "step": 8}),
+                "height": ("INT", {"default": 512, "min": 64, "max": 8192, "step": 8}),
+                "aspect_label": ("STRING", {"default": "1:1"}),
+                "enable_img2img": ("BOOLEAN", {"default": True}),
             },
             "hidden": {
                 "node_id": "UNIQUE_ID",
@@ -49,17 +53,23 @@ class INSTARAW_AdvancedImageLoader:
     FUNCTION = "load_batch"
     CATEGORY = "INSTARAW/Input"
 
-    def load_batch(self, mode="Batch Tensor", resize_mode="Center Crop", batch_index=0, node_id=None, batch_data="{}"):
+    def load_batch(self, mode="Batch Tensor", resize_mode="Center Crop", batch_index=0, width=512, height=512, aspect_label="1:1", enable_img2img=True, node_id=None, batch_data="{}"):
         print(f"\n{'='*60}")
         print(f"[INSTARAW Adv Loader] Mode: {mode} | Resize: {resize_mode} | Index: {batch_index}")
+        print(f"[INSTARAW Adv Loader] Enable img2img: {enable_img2img} | Resolution: {width}x{height} | Aspect: {aspect_label}")
         print(f"[INSTARAW Adv Loader] Loading batch for node: {node_id}")
-        
+
         try:
             data = json.loads(batch_data) if batch_data else {}
         except json.JSONDecodeError:
             print("[INSTARAW Adv Loader] Invalid batch_data JSON, using empty.")
             data = {}
 
+        # txt2img mode: Generate empty latents
+        if not enable_img2img:
+            return self._load_txt2img(data, mode, batch_index, width, height, aspect_label, node_id)
+
+        # img2img mode: Load actual images
         images_meta = data.get('images', [])
         order = data.get('order', [])
 
@@ -168,6 +178,105 @@ class INSTARAW_AdvancedImageLoader:
             canvas[pad_top:pad_top+new_h, pad_left:pad_left+new_w, :] = resized
             return canvas
         return img_tensor
+
+    def _load_txt2img(self, data, mode, batch_index, width, height, aspect_label, node_id):
+        """
+        Generate empty IMAGE tensors for txt2img mode.
+        Each "latent" is actually an empty IMAGE tensor that will be used as input.
+        """
+        latents_meta = data.get('latents', [])
+        order = data.get('order', [])
+
+        if not latents_meta or not order:
+            print(f"[INSTARAW Adv Loader] No latents in batch, returning empty {aspect_label} latent.")
+            empty = torch.zeros((1, height, width, 3), dtype=torch.float32)
+            return (empty, 0, 0, f"No latents defined ({aspect_label})")
+
+        total_count = sum(latent.get('repeat_count', 1) for latent in latents_meta)
+
+        if mode == "Sequential":
+            return self._load_txt2img_sequential(latents_meta, order, batch_index, total_count, node_id, data)
+        else:
+            return self._load_txt2img_batch(latents_meta, order, total_count)
+
+    def _load_txt2img_sequential(self, latents_meta, order, batch_index, total_count, node_id, data):
+        """Sequential mode for txt2img - return one empty latent at a time"""
+        state_key = f"{node_id}_txt2img_{hashlib.md5(json.dumps(data).encode()).hexdigest()[:8]}"
+
+        if state_key in self.node_states and self.node_states[state_key]['last_widget_index'] != batch_index:
+            self.node_states[state_key] = {'current_index': batch_index, 'last_widget_index': batch_index}
+        elif state_key not in self.node_states:
+            self.node_states[state_key] = {'current_index': batch_index, 'last_widget_index': batch_index}
+
+        current_index = self.node_states[state_key]['current_index']
+
+        # Build flat list of all latents with repeats
+        flat_list = []
+        for latent_id in order:
+            latent_meta = next((l for l in latents_meta if l['id'] == latent_id), None)
+            if not latent_meta:
+                continue
+            for i in range(latent_meta.get('repeat_count', 1)):
+                flat_list.append((latent_meta, i + 1, latent_meta.get('repeat_count', 1)))
+
+        if current_index >= len(flat_list):
+            empty = torch.zeros((1, 64, 64, 3), dtype=torch.float32)
+            return (empty, current_index, total_count, "Index out of range")
+
+        latent_meta, copy_num, repeat_count = flat_list[current_index]
+        w, h = latent_meta.get('width', 512), latent_meta.get('height', 512)
+        latent_id = latent_meta.get('id', 'unknown')
+
+        # Generate empty tensor
+        empty_tensor = torch.zeros((1, h, w, 3), dtype=torch.float32)
+        info = f"[{current_index}/{total_count}] Empty latent {latent_id[:8]} {w}x{h} (copy {copy_num}/{repeat_count})"
+
+        # Update state for next iteration
+        next_index = (current_index + 1) % total_count
+        self.node_states[state_key]['current_index'] = next_index
+        self.node_states[state_key]['last_widget_index'] = batch_index
+
+        try:
+            PromptServer.instance.send_sync("instaraw_adv_loader_update", {
+                "node_id": str(node_id),
+                "current_index": current_index,
+                "next_index": next_index,
+                "total_count": total_count
+            })
+        except Exception as e:
+            print(f"[INSTARAW Adv Loader] Error sending WebSocket update: {e}")
+
+        return (empty_tensor, current_index, total_count, info)
+
+    def _load_txt2img_batch(self, latents_meta, order, total_count):
+        """Batch tensor mode for txt2img - return all empty latents stacked"""
+        loaded_latents = []
+        info_lines = []
+
+        for latent_id in order:
+            latent_meta = next((l for l in latents_meta if l['id'] == latent_id), None)
+            if not latent_meta:
+                continue
+
+            w, h = latent_meta.get('width', 512), latent_meta.get('height', 512)
+            repeat_count = latent_meta.get('repeat_count', 1)
+            latent_display_id = latent_meta.get('id', 'unknown')[:8]
+
+            # Create empty tensor for this latent
+            empty_tensor = torch.zeros((h, w, 3), dtype=torch.float32)
+
+            # Add to batch according to repeat count
+            for i in range(repeat_count):
+                loaded_latents.append(empty_tensor)
+                info_lines.append(f"Empty latent {latent_display_id} {w}x{h} (copy {i+1}/{repeat_count})")
+
+        if not loaded_latents:
+            empty = torch.zeros((1, 64, 64, 3), dtype=torch.float32)
+            return (empty, 0, total_count, "No latents to generate")
+
+        # Stack all tensors into batch
+        batch_tensor = torch.stack(loaded_latents, dim=0)
+        return (batch_tensor, 0, total_count, "\n".join(info_lines))
 
     def _get_upload_dir(self, node_id):
         input_dir = folder_paths.get_input_directory()

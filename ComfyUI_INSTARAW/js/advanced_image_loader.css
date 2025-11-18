@@ -8,6 +8,43 @@
 	border-radius: 4px;
 	font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
 }
+
+/* Mode Indicator Styles */
+.instaraw-adv-loader-mode-indicator {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	margin-bottom: 12px;
+	padding: 10px 12px;
+	background: rgba(255, 255, 255, 0.04);
+	border-radius: 4px;
+	border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.instaraw-adv-loader-mode-badge {
+	flex: 1;
+	padding: 8px 16px;
+	border-radius: 4px;
+	font-size: 13px;
+	font-weight: 700;
+	text-align: center;
+	letter-spacing: 0.5px;
+	text-transform: uppercase;
+	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.instaraw-adv-loader-mode-txt2img {
+	background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);
+	color: #ffffff;
+	border: 2px solid #a78bfa;
+}
+
+.instaraw-adv-loader-mode-img2img {
+	background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+	color: #ffffff;
+	border: 2px solid #60a5fa;
+}
+
 .instaraw-adv-loader-mode-selector {
 	display: flex;
 	align-items: center;
@@ -346,4 +383,139 @@
 	color: #818cf8;
 	font-size: 11px;
 	font-weight: 600;
+}
+
+/* ===== Txt2Img Mode Styles ===== */
+
+/* Batch add controls */
+.instaraw-adv-loader-batch-add-controls {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.instaraw-adv-loader-batch-count-input {
+	width: 54px;
+	background: rgba(255, 255, 255, 0.06);
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	color: #f9fafb;
+	padding: 8px;
+	border-radius: 4px;
+	text-align: center;
+	font-size: 12px;
+	font-weight: 600;
+	outline: none;
+}
+
+.instaraw-adv-loader-batch-count-input:hover {
+	background: rgba(255, 255, 255, 0.08);
+	border-color: #818cf8;
+}
+
+.instaraw-adv-loader-batch-count-input:focus {
+	border-color: #a78bfa;
+}
+
+.instaraw-adv-loader-batch-add-btn {
+	background: #8b5cf6;
+	color: #ffffff;
+	border: none;
+	padding: 10px 20px;
+	border-radius: 4px;
+	cursor: pointer;
+	font-weight: 600;
+	font-size: 13px;
+	white-space: nowrap;
+}
+
+.instaraw-adv-loader-batch-add-btn:hover {
+	background: #7c3aed;
+}
+
+.instaraw-adv-loader-add-latent-btn {
+	background: #8b5cf6;
+	color: #ffffff;
+	border: none;
+	padding: 10px 20px;
+	border-radius: 4px;
+	cursor: pointer;
+	font-weight: 600;
+	font-size: 13px;
+}
+
+.instaraw-adv-loader-add-latent-btn:hover {
+	background: #7c3aed;
+}
+
+/* Empty latent placeholder */
+.instaraw-adv-loader-latent-thumb {
+	width: 100%;
+	height: 140px;
+	overflow: hidden;
+	position: relative;
+	background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a78bfa 100%);
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+}
+
+.instaraw-adv-loader-latent-aspect {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 4px;
+	color: #ffffff;
+}
+
+.instaraw-adv-loader-latent-aspect-icon {
+	font-size: 24px;
+	opacity: 0.9;
+}
+
+.instaraw-adv-loader-latent-aspect-label {
+	font-size: 13px;
+	font-weight: 600;
+	opacity: 0.95;
+	background: rgba(0, 0, 0, 0.2);
+	padding: 4px 10px;
+	border-radius: 4px;
+}
+
+.instaraw-adv-loader-latent-id {
+	position: absolute;
+	bottom: 8px;
+	left: 8px;
+	background: rgba(0, 0, 0, 0.5);
+	color: rgba(255, 255, 255, 0.8);
+	padding: 4px 8px;
+	border-radius: 4px;
+	font-size: 10px;
+	font-weight: 500;
+	font-family: 'Monaco', 'Consolas', 'Courier New', monospace;
+}
+
+.instaraw-adv-loader-latent-resolution {
+	color: #c4b5fd;
+	font-size: 11px;
+	font-weight: 600;
+}
+
+/* Aspect ratio preview box */
+.instaraw-adv-loader-aspect-preview {
+	max-width: 80%;
+	max-height: 80%;
+	background: rgba(255, 255, 255, 0.1);
+	border: 2px solid rgba(255, 255, 255, 0.3);
+	border-radius: 4px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 12px;
+}
+
+.instaraw-adv-loader-aspect-content {
+	text-align: center;
+	color: white;
 }
