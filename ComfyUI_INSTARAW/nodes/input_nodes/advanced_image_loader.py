@@ -106,7 +106,7 @@ class INSTARAW_AdvancedImageLoader:
             
             return (img_tensor, current_index, total, info)
         else:
-            return self._load_batch_tensor(upload_dir, images_meta, order, resize_mode, total_count)
+            return self._load_batch_tensor(upload_dir, images_meta, order, resize_mode, total_count, width, height)
 
     def _load_sequential(self, upload_dir, images_meta, order, batch_index, total_count):
         flat_list = []
@@ -134,12 +134,18 @@ class INSTARAW_AdvancedImageLoader:
             empty = torch.zeros((1, 64, 64, 3), dtype=torch.float32)
             return (empty, batch_index, total_count, f"Error: {e}")
 
-    def _load_batch_tensor(self, upload_dir, images_meta, order, resize_mode, total_count):
-        loaded_images, info_lines, target_height, target_width = [], [], None, None
+    def _load_batch_tensor(self, upload_dir, images_meta, order, resize_mode, total_count, target_width, target_height):
+        """
+        Load batch tensor with ALL images resized to target_width x target_height from aspect ratio selector.
+        This ensures consistent tensor dimensions controlled by the WAN/SDXL aspect ratio node.
+        """
+        loaded_images, info_lines = [], []
+        print(f"[INSTARAW Adv Loader] Batch Tensor Mode - Target dimensions: {target_width}x{target_height} (from aspect ratio selector)")
+
         for img_id in order:
             img_meta = next((img for img in images_meta if img['id'] == img_id), None)
             if not img_meta: continue
-            
+
             filename, repeat_count, original_name = img_meta['filename'], img_meta.get('repeat_count', 1), img_meta.get('original_name', img_meta['filename'])
             img_path = os.path.join(upload_dir, filename)
             if not os.path.exists(img_path): continue
@@ -147,10 +153,11 @@ class INSTARAW_AdvancedImageLoader:
             try:
                 img = Image.open(img_path).convert('RGB')
                 img_tensor = torch.from_numpy(np.array(img).astype(np.float32) / 255.0)
-                if target_height is None:
-                    target_height, target_width = img_tensor.shape[0], img_tensor.shape[1]
+
+                # Always resize to target dimensions (from aspect ratio selector)
                 if img_tensor.shape[0] != target_height or img_tensor.shape[1] != target_width:
                     img_tensor = self._resize_image(img_tensor, target_width, target_height, resize_mode)
+                    print(f"[INSTARAW Adv Loader] Resized {original_name} from {img.size[0]}x{img.size[1]} → {target_width}x{target_height} ({resize_mode})")
                 for i in range(repeat_count):
                     loaded_images.append(img_tensor)
                     info_lines.append(f"{original_name} (copy {i+1}/{repeat_count})")

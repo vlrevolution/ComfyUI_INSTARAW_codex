@@ -368,6 +368,8 @@ app.registerExtension({
 					const currentMode = modeWidget?.value || "Batch Tensor";
 					const batchIndexWidget = node.widgets?.find((w) => w.name === "batch_index");
 					const currentIndex = node._processingIndex !== undefined ? node._processingIndex : batchIndexWidget?.value || 0;
+
+					// Get current dimensions from aspect ratio selector (for live updates)
 					const dimensions = getTxt2ImgDimensions();
 
 					// Debug: Log dimensions for debugging
@@ -418,11 +420,12 @@ app.registerExtension({
 									const isPast = currentMode === "Sequential" && currentIndex > endIdx;
 									const isProcessing = node._isProcessing && isActive;
 
-									// Ensure width and height are integers
-									const width = parseInt(latent.width) || 960;
-									const height = parseInt(latent.height) || 960;
+									// Use CURRENT dimensions from aspect ratio selector (not stored dimensions)
+									// This ensures live updates when aspect ratio selector changes
+									const width = dimensions.width;
+									const height = dimensions.height;
 									const aspectRatio = width / height;
-									const aspectLabel = latent.aspect_label || getAspectLabel(width, height);
+									const aspectLabel = dimensions.aspect_label;
 
 									return `<div class="instaraw-adv-loader-item ${isActive ? "instaraw-adv-loader-item-active" : ""} ${isPast ? "instaraw-adv-loader-item-done" : ""} ${isProcessing ? "instaraw-adv-loader-item-processing" : ""}" data-id="${latent.id}" draggable="true">
                                         ${currentMode === "Sequential" ? `<div class="instaraw-adv-loader-index-badge">${repeatCount === 1 ? `#${startIdx}` : `#${startIdx}-${endIdx}`}</div>` : ""}
@@ -745,6 +748,8 @@ app.registerExtension({
 						syncBatchDataWidget();
 						const statsEl = container.querySelector(".instaraw-adv-loader-total");
 						if (statsEl) statsEl.textContent = `Total: ${batchData.total_count} (with repeats)`;
+						// Trigger re-render to update RPG
+						renderGallery();
 					}
 				};
 
@@ -849,6 +854,37 @@ app.registerExtension({
 						};
 						batchIndexWidget._instaraw_callback_added = true;
 					}
+
+					// Aspect ratio widgets - re-render when dimensions change
+					const widthWidget = node.widgets?.find((w) => w.name === "width");
+					if (widthWidget && !widthWidget._instaraw_callback_added) {
+						const originalCallback = widthWidget.callback;
+						widthWidget.callback = function() {
+							if (originalCallback) originalCallback.apply(this, arguments);
+							renderGallery();
+						};
+						widthWidget._instaraw_callback_added = true;
+					}
+
+					const heightWidget = node.widgets?.find((w) => w.name === "height");
+					if (heightWidget && !heightWidget._instaraw_callback_added) {
+						const originalCallback = heightWidget.callback;
+						heightWidget.callback = function() {
+							if (originalCallback) originalCallback.apply(this, arguments);
+							renderGallery();
+						};
+						heightWidget._instaraw_callback_added = true;
+					}
+
+					const aspectLabelWidget = node.widgets?.find((w) => w.name === "aspect_label");
+					if (aspectLabelWidget && !aspectLabelWidget._instaraw_callback_added) {
+						const originalCallback = aspectLabelWidget.callback;
+						aspectLabelWidget.callback = function() {
+							if (originalCallback) originalCallback.apply(this, arguments);
+							renderGallery();
+						};
+						aspectLabelWidget._instaraw_callback_added = true;
+					}
 				};
 
 				// Periodic mode check - checks every 2 seconds if mode changed
@@ -862,6 +898,27 @@ app.registerExtension({
 					}, 2000);
 					// Store on node for cleanup
 					node._modeCheckInterval = modeCheckInterval;
+				};
+
+				// Periodic dimension check - checks every 2 seconds if dimensions changed
+				let dimensionCheckInterval = null;
+				let lastDimensions = null;
+				const startDimensionCheck = () => {
+					if (dimensionCheckInterval) clearInterval(dimensionCheckInterval);
+					dimensionCheckInterval = setInterval(() => {
+						// Only check dimensions in txt2img mode (where aspect ratio matters for latent display)
+						if (isTxt2ImgMode()) {
+							const currentDims = getTxt2ImgDimensions();
+							const dimsKey = `${currentDims.width}x${currentDims.height}:${currentDims.aspect_label}`;
+							if (lastDimensions !== null && lastDimensions !== dimsKey) {
+								console.log(`[INSTARAW AIL ${node.id}] Dimensions changed: ${lastDimensions} -> ${dimsKey}`);
+								renderGallery();
+							}
+							lastDimensions = dimsKey;
+						}
+					}, 2000);
+					// Store on node for cleanup
+					node._dimensionCheckInterval = dimensionCheckInterval;
 				};
 
 				const handleBatchUpdate = (event) => {
@@ -959,6 +1016,7 @@ app.registerExtension({
 					syncBatchDataWidget();
 					setupWidgetCallbacks();
 					startModeCheck();
+					startDimensionCheck();
 					renderGallery();
 				}, 100);
 			};
@@ -990,6 +1048,11 @@ app.registerExtension({
 				if (this._modeCheckInterval) {
 					clearInterval(this._modeCheckInterval);
 					this._modeCheckInterval = null;
+				}
+				// Clean up the periodic dimension check interval
+				if (this._dimensionCheckInterval) {
+					clearInterval(this._dimensionCheckInterval);
+					this._dimensionCheckInterval = null;
 				}
 				onRemoved?.apply(this, arguments);
 			};

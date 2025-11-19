@@ -124,17 +124,128 @@ app.registerExtension({
 					}
 				};
 
-				// Get target output dimensions from aspect ratio selector
-				const getTargetDimensions = () => {
-					const widthWidget = node.widgets?.find(w => w.name === "output_width");
-					const heightWidget = node.widgets?.find(w => w.name === "output_height");
-					const aspectWidget = node.widgets?.find(w => w.name === "aspect_label");
+				// === Aspect Ratio Node Reading (Same as AIL) ===
 
-					return {
-						width: widthWidget?.value || 1024,
-						height: heightWidget?.value || 1024,
-						aspect_label: aspectWidget?.value || "1:1"
+				/**
+				 * Reads output from WAN/SDXL aspect ratio nodes.
+				 * Must match Python ASPECT_RATIOS dicts exactly.
+				 */
+				const getAspectRatioOutput = (aspectRatioNode, slotIndex) => {
+					const selection = aspectRatioNode.widgets?.[0]?.value;
+					if (!selection) {
+						console.warn(`[RPG] Aspect ratio node has no selection`);
+						return null;
+					}
+
+					const WAN_RATIOS = {
+						"3:4 (Portrait)": { width: 720, height: 960, label: "3:4" },
+						"9:16 (Tall Portrait)": { width: 540, height: 960, label: "9:16" },
+						"1:1 (Square)": { width: 960, height: 960, label: "1:1" },
+						"16:9 (Landscape)": { width: 960, height: 540, label: "16:9" }
 					};
+
+					const SDXL_RATIOS = {
+						"3:4 (Portrait)": { width: 896, height: 1152, label: "3:4" },
+						"9:16 (Tall Portrait)": { width: 768, height: 1344, label: "9:16" },
+						"1:1 (Square)": { width: 1024, height: 1024, label: "1:1" },
+						"16:9 (Landscape)": { width: 1344, height: 768, label: "16:9" }
+					};
+
+					const ratios = aspectRatioNode.type === "INSTARAW_WANAspectRatio" ? WAN_RATIOS : SDXL_RATIOS;
+					const config = ratios[selection];
+					if (!config) {
+						console.warn(`[RPG] Unknown aspect ratio selection: ${selection}`);
+						return null;
+					}
+
+					console.log(`[RPG] Aspect ratio node output:`, {
+						selection,
+						slotIndex,
+						type: aspectRatioNode.type,
+						value: slotIndex === 0 ? config.width : slotIndex === 1 ? config.height : config.label
+					});
+
+					// Return based on output slot (0=width, 1=height, 2=aspect_label)
+					if (slotIndex === 0) return config.width;
+					if (slotIndex === 1) return config.height;
+					if (slotIndex === 2) return config.label;
+					return null;
+				};
+
+				/**
+				 * Retrieves the final value of an input by traversing connected nodes.
+				 * Enhanced to properly handle multi-output nodes like aspect ratio nodes.
+				 */
+				const getFinalInputValue = (inputName, defaultValue) => {
+					try {
+						if (!node.inputs || node.inputs.length === 0) {
+							const widget = node.widgets?.find(w => w.name === inputName);
+							return widget ? widget.value : defaultValue;
+						}
+
+						const input = node.inputs.find(i => i.name === inputName);
+						if (!input || input.link == null) {
+							const widget = node.widgets?.find(w => w.name === inputName);
+							return widget ? widget.value : defaultValue;
+						}
+
+						// Access app.graph safely
+						if (typeof app === 'undefined' || !app.graph) {
+							console.warn('[RPG] app.graph not available, using widget value');
+							const widget = node.widgets?.find(w => w.name === inputName);
+							return widget ? widget.value : defaultValue;
+						}
+
+						const link = app.graph.links[input.link];
+						if (!link) return defaultValue;
+
+						const originNode = app.graph.getNodeById(link.origin_id);
+						if (!originNode) return defaultValue;
+
+						// SPECIAL HANDLING: For aspect ratio nodes, compute the output locally
+						if (originNode.type === "INSTARAW_WANAspectRatio" || originNode.type === "INSTARAW_SDXLAspectRatio") {
+							const output = getAspectRatioOutput(originNode, link.origin_slot);
+							if (output !== null) return output;
+						}
+
+						// For other nodes, read from widgets
+						if (originNode.widgets && originNode.widgets.length > 0) {
+							return originNode.widgets[0].value;
+						}
+
+						if (originNode.properties && originNode.properties.value !== undefined) {
+							return originNode.properties.value;
+						}
+
+						return defaultValue;
+					} catch (error) {
+						console.error('[RPG] Error in getFinalInputValue:', error);
+						return defaultValue;
+					}
+				};
+
+				/**
+				 * Get target output dimensions from aspect ratio selector.
+				 * Now properly reads from connected aspect ratio nodes!
+				 */
+				const getTargetDimensions = () => {
+					try {
+						const width = getFinalInputValue("output_width", 1024);
+						const height = getFinalInputValue("output_height", 1024);
+						const aspect_label = getFinalInputValue("aspect_label", "1:1");
+
+						const dims = {
+							width: parseInt(width) || 1024,
+							height: parseInt(height) || 1024,
+							aspect_label: aspect_label || "1:1"
+						};
+
+						console.log("[RPG] Target dimensions from aspect ratio node:", dims);
+						return dims;
+					} catch (error) {
+						console.error('[RPG] Error in getTargetDimensions:', error);
+						return { width: 1024, height: 1024, aspect_label: "1:1" };
+					}
 				};
 
 				const parsePromptBatch = () => {
@@ -938,31 +1049,32 @@ app.registerExtension({
 
 											let thumbnailHtml = '';
 											if (hasThumbnail) {
+												// Both modes: Show aspect ratio box with content inside
+												const targetDims = getTargetDimensions();
+												const targetAspectRatio = targetDims.width / targetDims.height;
+
 												if (detectedMode === "img2img") {
-													// Show image thumbnail with target output dimensions
-													const targetDims = getTargetDimensions();
-													const targetAspectRatio = targetDims.width / targetDims.height;
+													// IMG2IMG: Show image in aspect ratio box with aspect ratio overlay
 													thumbnailHtml = `
-														<label class="instaraw-rpg-thumbnail-label">IMG2IMG Input Image → Output: ${targetDims.aspect_label} (${targetDims.width}×${targetDims.height})</label>
-														<div class="instaraw-rpg-batch-thumbnail">
+														<div class="instaraw-rpg-batch-thumbnail instaraw-rpg-batch-thumbnail-latent">
 															<span class="instaraw-rpg-batch-thumbnail-index">#${idx + 1}</span>
-															<div class="instaraw-rpg-batch-aspect-preview" style="aspect-ratio: ${targetAspectRatio};">
+															<div class="instaraw-rpg-batch-aspect-preview" style="aspect-ratio: ${targetAspectRatio}; position: relative; overflow: hidden;">
 																<img src="${linkedItem.url}" alt="Linked image ${idx + 1}" style="width: 100%; height: 100%; object-fit: cover;" />
-																<div class="instaraw-rpg-crop-indicator">Center Crop</div>
+																<div class="instaraw-rpg-batch-aspect-content" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; pointer-events: none;">
+																	<div style="font-size: 14px; font-weight: 600; color: white; text-shadow: 0 2px 4px rgba(0,0,0,0.8); background: rgba(139, 92, 246, 0.75); padding: 4px 10px; border-radius: 4px;">${targetDims.aspect_label}</div>
+																</div>
 															</div>
 														</div>
 													`;
 												} else {
-													// Show latent preview with aspect ratio box (like AIL)
-													const aspectRatio = linkedItem.width / linkedItem.height;
+													// TXT2IMG: Show empty latent with aspect ratio box
 													thumbnailHtml = `
-														<label class="instaraw-rpg-thumbnail-label">TXT2IMG Empty Latent</label>
 														<div class="instaraw-rpg-batch-thumbnail instaraw-rpg-batch-thumbnail-latent">
 															<span class="instaraw-rpg-batch-thumbnail-index">#${idx + 1}</span>
-															<div class="instaraw-rpg-batch-aspect-preview" style="aspect-ratio: ${aspectRatio};">
+															<div class="instaraw-rpg-batch-aspect-preview" style="aspect-ratio: ${targetAspectRatio};">
 																<div class="instaraw-rpg-batch-aspect-content">
 																	<div style="font-size: 24px;">📐</div>
-																	<div style="font-size: 14px; font-weight: 600;">${linkedItem.aspect_label || '1:1'}</div>
+																	<div style="font-size: 14px; font-weight: 600;">${targetDims.aspect_label}</div>
 																</div>
 															</div>
 														</div>
@@ -1019,6 +1131,7 @@ app.registerExtension({
 								</div>
 
 								<!-- Thumbnail Section -->
+								<label class="instaraw-rpg-thumbnail-label">${detectedMode === "img2img" ? "IMG2IMG Input Image" : "TXT2IMG Empty Latent"}</label>
 								${thumbnailHtml}
 
 								<div class="instaraw-rpg-batch-item-content">
@@ -1060,14 +1173,17 @@ app.registerExtension({
 					const libraryCount = promptQueue.filter(p => p.source_id).length;
 					const aiCount = promptQueue.filter(p => !p.source_id).length;
 
-					// Show sync button if: AIL linked + txt2img mode + has prompts
-					const showSyncButton = hasAILLink && detectedMode === "txt2img" && promptQueue.length > 0;
-
 					// Check for repeat count mismatches
 					const hasRepeatMismatch = promptQueue.some((p, idx) => {
 						const linkedItem = detectedMode === "img2img" ? linkedImages[idx] : linkedLatents[idx];
 						return linkedItem && (p.repeat_count || 1) !== (linkedItem.repeat_count || 1);
 					});
+
+					// Show smart sync button if: AIL linked + has prompts
+					// Will handle both latent creation (txt2img) and repeat syncing (both modes)
+					const showSyncButton = hasAILLink && promptQueue.length > 0;
+					const needsLatentSync = detectedMode === "txt2img" && linkedLatents.length !== promptQueue.length;
+					const needsRepeatSync = hasRepeatMismatch;
 
 					return `
 						<div class="instaraw-rpg-batch-header">
@@ -1079,13 +1195,9 @@ app.registerExtension({
 							</div>
 							<div class="instaraw-rpg-batch-actions">
 								${showSyncButton ? `
-									<button class="instaraw-rpg-btn-primary instaraw-rpg-sync-ail-btn" title="Create ${totalGenerations} empty latents in AIL #${node._linkedAILNodeId}">
-										📤 Sync AIL (${totalGenerations})
-									</button>
-								` : ''}
-								${hasAILLink && promptQueue.length > 0 ? `
-									<button class="instaraw-rpg-btn-secondary instaraw-rpg-sync-repeats-btn ${hasRepeatMismatch ? 'instaraw-rpg-btn-warning' : ''}" title="Sync repeat counts from prompts to AIL">
-										${hasRepeatMismatch ? '⚠️ ' : '🔄 '}Sync Repeats
+									<button class="instaraw-rpg-btn-${needsLatentSync || needsRepeatSync ? 'primary' : 'secondary'} instaraw-rpg-sync-ail-btn ${needsLatentSync || needsRepeatSync ? 'instaraw-rpg-btn-warning' : ''}"
+										title="${needsLatentSync ? `Create ${totalGenerations} latents in AIL` : ''}${needsLatentSync && needsRepeatSync ? ' and ' : ''}${needsRepeatSync ? 'Sync repeat counts' : ''}${!needsLatentSync && !needsRepeatSync ? 'Everything synced!' : ''}">
+										${needsLatentSync || needsRepeatSync ? '⚠️ ' : '✓ '}Sync AIL${needsLatentSync ? ` (${totalGenerations})` : ''}
 									</button>
 								` : ''}
 								<button class="instaraw-rpg-btn-secondary instaraw-rpg-reorder-toggle-btn">
@@ -1120,7 +1232,7 @@ app.registerExtension({
 					const latents = node._linkedLatents || [];
 					const isImg2Img = detectedMode === "img2img";
 					const items = isImg2Img ? images : latents;
-					const displayItems = items.slice(0, 10);
+					const displayItems = items; // Show ALL items, not just first 10
 					const itemLabel = isImg2Img ? "images" : "latents";
 
 					const isMatch = totalGenerations === itemCount;
@@ -1138,31 +1250,28 @@ app.registerExtension({
 							<div class="instaraw-rpg-image-preview-grid">
 								${displayItems
 									.map((item, idx) => {
+										// Both modes use same structure with target dimensions
+										const targetDims = getTargetDimensions();
+										const targetAspectRatio = targetDims.width / targetDims.height;
+
 										if (isImg2Img) {
-											// Display image thumbnail with target output aspect ratio and center crop
-											const targetDims = getTargetDimensions();
-											const targetAspectRatio = targetDims.width / targetDims.height;
+											// IMG2IMG: Show image in aspect ratio box
 											return `
 												<div class="instaraw-rpg-preview-thumb">
 													<span class="instaraw-rpg-preview-index">#${idx + 1}</span>
-													<div class="instaraw-rpg-preview-aspect-box" style="aspect-ratio: ${targetAspectRatio}; position: relative;">
-														<img src="${item.url}" alt="Preview ${idx + 1}" style="width: 100%; height: 100%; object-fit: cover;" />
-														<div class="instaraw-rpg-crop-indicator">Center Crop</div>
-													</div>
-													<span class="instaraw-rpg-preview-aspect-label">→ ${targetDims.aspect_label} (${targetDims.width}×${targetDims.height})</span>
+													<img src="${item.url}" alt="Preview ${idx + 1}" />
 													${item.repeat_count && item.repeat_count > 1 ? `<span class="instaraw-rpg-preview-repeat">×${item.repeat_count}</span>` : ''}
 												</div>
 											`;
 										} else {
-											// Display latent placeholder with aspect preview box
-											const aspectRatio = item.width / item.height;
+											// TXT2IMG: Show empty latent with emoji and aspect ratio below
 											return `
 												<div class="instaraw-rpg-preview-latent">
 													<span class="instaraw-rpg-preview-index">#${idx + 1}</span>
-													<div class="instaraw-rpg-preview-aspect-box" style="aspect-ratio: ${aspectRatio};">
+													<div class="instaraw-rpg-preview-aspect-box" style="aspect-ratio: ${targetAspectRatio};">
 														<div class="instaraw-rpg-preview-aspect-content">
 															<div style="font-size: 20px;">📐</div>
-															<div style="font-size: 11px; font-weight: 600;">${item.aspect_label || '1:1'}</div>
+															<div style="font-size: 11px; font-weight: 600; margin-top: 4px;">${targetDims.aspect_label}</div>
 														</div>
 													</div>
 													${item.repeat_count && item.repeat_count > 1 ? `<span class="instaraw-rpg-preview-repeat">×${item.repeat_count}</span>` : ''}
@@ -1171,7 +1280,6 @@ app.registerExtension({
 										}
 									})
 									.join("")}
-								${items.length > 10 ? `<div class="instaraw-rpg-preview-more">+${items.length - 10} more</div>` : ""}
 							</div>
 						</div>
 					`;
@@ -1240,173 +1348,6 @@ app.registerExtension({
 
 				const generateUniqueId = () => {
 					return `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-				};
-
-				/**
-				 * Gets the value from an input, handling both widgets on the current node
-				 * and values from connected nodes (like Primitive string nodes).
-				 * @param {string} inputName The name of the input.
-				 * @param {any} defaultValue The value to return if no input is found.
-				 * @returns {any} The found value or the default.
-				 */
-				const getFinalInputValue = (inputName, defaultValue) => {
-					console.group(`[RPG] 🔍 Getting input value for: "${inputName}"`);
-					console.log(`[RPG] Node ID: ${node.id}, Node Type: ${node.type}`);
-
-					// Log the entire node structure for debugging
-					console.log(`[RPG] Node has ${node.inputs?.length || 0} inputs total`);
-					console.log(`[RPG] Node has ${node.widgets?.length || 0} widgets total`);
-
-					if (node.inputs && node.inputs.length > 0) {
-						console.log(`[RPG] All inputs on this node:`, node.inputs.map(i => ({
-							name: i.name,
-							type: i.type,
-							link: i.link,
-							has_link: i.link != null
-						})));
-					}
-
-					if (node.widgets && node.widgets.length > 0) {
-						console.log(`[RPG] All widgets on this node:`, node.widgets.map(w => ({
-							name: w.name,
-							type: w.type,
-							value: w.value ? "[HAS VALUE]" : "[EMPTY]"
-						})));
-					}
-
-					// Check if node has inputs array
-					if (!node.inputs || node.inputs.length === 0) {
-						console.warn(`[RPG] ⚠️ No inputs found on node!`);
-						// Fallback to widget
-						const widget = node.widgets?.find(w => w.name === inputName);
-						if (widget) {
-							console.log(`[RPG] ✅ Found value in local widget:`, widget.value);
-							console.groupEnd();
-							return widget.value;
-						}
-						console.log(`[RPG] ❌ No widget found, returning default:`, defaultValue);
-						console.groupEnd();
-						return defaultValue;
-					}
-
-					// Find the input by name
-					const input = node.inputs.find(i => i.name === inputName);
-
-					if (!input) {
-						console.error(`[RPG] ❌ Input "${inputName}" not found! Available inputs:`, node.inputs.map(i => i.name));
-						console.groupEnd();
-						return defaultValue;
-					}
-
-					console.log(`[RPG] ✅ Input found:`, {
-						name: input.name,
-						type: input.type,
-						link: input.link,
-						has_link: input.link != null
-					});
-
-					// Check if input is connected (has a link)
-					if (input.link == null) {
-						console.warn(`[RPG] ⚠️ Input "${inputName}" is not connected (link is null)`);
-
-						// Check if there's a widget as fallback
-						const widget = node.widgets?.find(w => w.name === inputName);
-						if (widget) {
-							console.log(`[RPG] ✅ Found fallback value in local widget:`, widget.value);
-							console.groupEnd();
-							return widget.value;
-						}
-
-						console.log(`[RPG] ❌ No fallback widget, returning default:`, defaultValue);
-						console.groupEnd();
-						return defaultValue;
-					}
-
-					// Get the link from the graph
-					const link = app.graph.links[input.link];
-
-					if (!link) {
-						console.error(`[RPG] ❌ Link ${input.link} not found in app.graph.links!`);
-						console.log(`[RPG] Available links in graph:`, Object.keys(app.graph.links || {}));
-						console.groupEnd();
-						return defaultValue;
-					}
-
-					console.log(`[RPG] ✅ Link found:`, {
-						id: link.id,
-						origin_id: link.origin_id,
-						origin_slot: link.origin_slot,
-						target_id: link.target_id,
-						target_slot: link.target_slot,
-						type: link.type
-					});
-
-					// Get the origin node
-					const originNode = app.graph.getNodeById(link.origin_id);
-
-					if (!originNode) {
-						console.error(`[RPG] ❌ Origin node ${link.origin_id} not found!`);
-						console.log(`[RPG] Available nodes in graph:`, app.graph._nodes.map(n => ({id: n.id, type: n.type})));
-						console.groupEnd();
-						return defaultValue;
-					}
-
-					console.log(`[RPG] ✅ Origin node found:`, {
-						id: originNode.id,
-						type: originNode.type,
-						title: originNode.title,
-						has_widgets: originNode.widgets && originNode.widgets.length > 0,
-						widget_count: originNode.widgets?.length || 0,
-						has_properties: originNode.properties !== undefined
-					});
-
-					// Log all widgets on the origin node
-					if (originNode.widgets && originNode.widgets.length > 0) {
-						console.log(`[RPG] Origin node widgets:`, originNode.widgets.map((w, idx) => ({
-							index: idx,
-							name: w.name,
-							type: w.type,
-							value: typeof w.value === 'string' && w.value.length > 50
-								? `[STRING LENGTH: ${w.value.length}]`
-								: w.value
-						})));
-
-						const value = originNode.widgets[0].value;
-						console.log(`[RPG] ✅ Returning value from origin node widget[0]:`,
-							typeof value === 'string' && value.length > 50
-								? `[STRING LENGTH: ${value.length}, Preview: ${value.substring(0, 20)}...]`
-								: value
-						);
-						console.groupEnd();
-						return value;
-					}
-
-					// Fallback: check properties (some node types store value here)
-					if (originNode.properties) {
-						console.log(`[RPG] Origin node properties:`, originNode.properties);
-
-						if (originNode.properties.value !== undefined) {
-							const value = originNode.properties.value;
-							console.log(`[RPG] ✅ Found value in origin node properties:`, value);
-							console.groupEnd();
-							return value;
-						}
-					}
-
-					console.warn(`[RPG] ⚠️ Origin node has no widgets or properties with value`);
-					console.log(`[RPG] Origin node full structure:`, originNode);
-
-					// Last resort: check if there's a widget on this node
-					const widget = node.widgets?.find(w => w.name === inputName);
-					if (widget) {
-						console.log(`[RPG] ✅ Found fallback value in local widget:`, widget.value);
-						console.groupEnd();
-						return widget.value;
-					}
-
-					console.log(`[RPG] ❌ No value found anywhere, returning default:`, defaultValue);
-					console.groupEnd();
-					return defaultValue;
 				};
 
 				// === Add Prompt to Batch ===
@@ -2158,29 +2099,7 @@ app.registerExtension({
 						};
 					}
 
-					// Sync Repeats button
-					const syncRepeatsBtn = container.querySelector(".instaraw-rpg-sync-repeats-btn");
-					if (syncRepeatsBtn) {
-						syncRepeatsBtn.onclick = () => {
-							const promptQueue = parsePromptBatch();
-							const detectedMode = node._linkedAILMode || "img2img";
-
-							if (confirm(`This will update repeat counts in AIL Node #${node._linkedAILNodeId} to match your ${promptQueue.length} prompts.\n\nContinue?`)) {
-								// Send sync event to AIL
-								window.dispatchEvent(new CustomEvent("INSTARAW_SYNC_AIL_REPEATS", {
-									detail: {
-										targetNodeId: node._linkedAILNodeId,
-										mode: detectedMode,
-										repeats: promptQueue.map(p => p.repeat_count || 1)
-									}
-								}));
-
-								console.log(`[INSTARAW RPG] Sent repeat sync request to AIL #${node._linkedAILNodeId}`);
-							}
-						};
-					}
-
-					// Sync AIL button
+					// Smart Sync AIL button - handles both latent creation and repeat syncing
 					const syncAilBtn = container.querySelector(".instaraw-rpg-sync-ail-btn");
 					if (syncAilBtn) {
 						syncAilBtn.onclick = () => {
@@ -2190,32 +2109,59 @@ app.registerExtension({
 							}
 
 							const promptQueue = parsePromptBatch();
+							const detectedMode = node._linkedAILMode || "img2img";
 							const totalGenerations = promptQueue.reduce((sum, p) => sum + (p.repeat_count || 1), 0);
 
-							// Build latent specs with repeat counts
-							const latentSpecs = promptQueue.map(p => ({
-								repeat_count: p.repeat_count || 1
-							}));
+							// Get target dimensions from aspect ratio selector
+							const targetDims = getTargetDimensions();
 
-							if (confirm(`This will create ${promptQueue.length} latent${promptQueue.length !== 1 ? 's' : ''} (${totalGenerations} total generations) in AIL Node #${node._linkedAILNodeId} to match your prompts.\n\nContinue?`)) {
-								// Get current dimensions from AIL (or use defaults)
-								const dimensions = {
-									width: 1024,
-									height: 1024,
-									aspect_label: "1:1"
-								};
+							// Determine what needs syncing
+							const linkedLatents = node._linkedLatents || [];
+							const linkedImages = node._linkedImages || [];
+							const needsLatentSync = detectedMode === "txt2img" && linkedLatents.length !== promptQueue.length;
+							const needsRepeatSync = promptQueue.some((p, idx) => {
+								const linkedItem = detectedMode === "img2img" ? linkedImages[idx] : linkedLatents[idx];
+								return linkedItem && (p.repeat_count || 1) !== (linkedItem.repeat_count || 1);
+							});
 
-								// Dispatch event to AIL with latent specs
+							let confirmMsg = "";
+							if (needsLatentSync && needsRepeatSync) {
+								confirmMsg = `This will:\n1. Create ${promptQueue.length} latents (${totalGenerations} total) at ${targetDims.aspect_label}\n2. Sync repeat counts\n\nContinue?`;
+							} else if (needsLatentSync) {
+								confirmMsg = `Create ${promptQueue.length} latents (${totalGenerations} total) at ${targetDims.aspect_label} in AIL #${node._linkedAILNodeId}?\n\nContinue?`;
+							} else if (needsRepeatSync) {
+								confirmMsg = `Sync repeat counts to AIL Node #${node._linkedAILNodeId}?\n\nContinue?`;
+							} else {
+								confirmMsg = `Everything is already synced! Sync anyway?\n\nContinue?`;
+							}
+
+							if (!confirm(confirmMsg)) return;
+
+							// 1. Create/sync latents if needed (txt2img mode)
+							if (needsLatentSync || detectedMode === "txt2img") {
+								const latentSpecs = promptQueue.map(p => ({
+									repeat_count: p.repeat_count || 1
+								}));
+
 								window.dispatchEvent(new CustomEvent("INSTARAW_SYNC_AIL_LATENTS", {
 									detail: {
 										targetNodeId: node._linkedAILNodeId,
 										latentSpecs: latentSpecs,
-										dimensions: dimensions
+										dimensions: targetDims
 									}
 								}));
-
-								console.log(`[INSTARAW RPG] Sent sync request to AIL #${node._linkedAILNodeId} for ${promptQueue.length} latents (${totalGenerations} generations)`);
+								console.log(`[RPG] Synced ${promptQueue.length} latents to AIL`);
 							}
+
+							// 2. Sync repeat counts (both modes)
+							window.dispatchEvent(new CustomEvent("INSTARAW_SYNC_AIL_REPEATS", {
+								detail: {
+									targetNodeId: node._linkedAILNodeId,
+									mode: detectedMode,
+									repeats: promptQueue.map(p => p.repeat_count || 1)
+								}
+							}));
+							console.log(`[RPG] Synced repeat counts to AIL`);
 						};
 					}
 
@@ -2348,13 +2294,65 @@ app.registerExtension({
 
 				widget.computeSize = (width) => [width, cachedHeight + 2];
 
+				// Add widget change callbacks to automatically refresh UI when aspect ratio changes
+				const setupWidgetCallbacks = () => {
+					const widthWidget = node.widgets?.find((w) => w.name === "output_width");
+					if (widthWidget && !widthWidget._instaraw_callback_added) {
+						const originalCallback = widthWidget.callback;
+						widthWidget.callback = function() {
+							if (originalCallback) originalCallback.apply(this, arguments);
+							renderUI();
+						};
+						widthWidget._instaraw_callback_added = true;
+					}
+
+					const heightWidget = node.widgets?.find((w) => w.name === "output_height");
+					if (heightWidget && !heightWidget._instaraw_callback_added) {
+						const originalCallback = heightWidget.callback;
+						heightWidget.callback = function() {
+							if (originalCallback) originalCallback.apply(this, arguments);
+							renderUI();
+						};
+						heightWidget._instaraw_callback_added = true;
+					}
+
+					const aspectWidget = node.widgets?.find((w) => w.name === "aspect_label");
+					if (aspectWidget && !aspectWidget._instaraw_callback_added) {
+						const originalCallback = aspectWidget.callback;
+						aspectWidget.callback = function() {
+							if (originalCallback) originalCallback.apply(this, arguments);
+							renderUI();
+						};
+						aspectWidget._instaraw_callback_added = true;
+					}
+				};
+
+				// Periodic dimension check - checks every 2 seconds if dimensions changed
+				let dimensionCheckInterval = null;
+				let lastDimensions = null;
+				const startDimensionCheck = () => {
+					if (dimensionCheckInterval) clearInterval(dimensionCheckInterval);
+					dimensionCheckInterval = setInterval(() => {
+						const currentDims = getTargetDimensions();
+						const dimsKey = `${currentDims.width}x${currentDims.height}:${currentDims.aspect_label}`;
+						if (lastDimensions !== null && lastDimensions !== dimsKey) {
+							console.log(`[RPG] Dimensions changed: ${lastDimensions} -> ${dimsKey}`);
+							renderUI();
+						}
+						lastDimensions = dimsKey;
+					}, 2000);
+				};
+
 				// Store references for lifecycle hooks
 				node._updateCachedHeight = updateCachedHeight;
 				node._renderUI = renderUI;
+				node._setupWidgetCallbacks = setupWidgetCallbacks;
 
 				// Initial setup
 				setTimeout(() => {
 					syncPromptBatchWidget();
+					setupWidgetCallbacks();
+					startDimensionCheck();
 					loadPromptsDatabase();
 					renderUI();
 				}, 100);
@@ -2377,6 +2375,7 @@ app.registerExtension({
 				setTimeout(() => {
 					const promptQueueWidget = this.widgets?.find((w) => w.name === "prompt_queue_data");
 					if (promptQueueWidget) promptQueueWidget.value = this.properties.prompt_queue_data || "[]";
+					if (this._setupWidgetCallbacks) this._setupWidgetCallbacks();
 					if (this._renderUI) this._renderUI();
 				}, 200);
 			};
