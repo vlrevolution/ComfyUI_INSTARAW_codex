@@ -11,11 +11,11 @@ const DEFAULT_RPG_SYSTEM_PROMPT = "You are an expert AI prompt engineer speciali
 const REMOTE_PROMPTS_DB_URL = "https://instara.s3.us-east-1.amazonaws.com/prompts.db.json";
 const CREATIVE_MODEL_OPTIONS = [
 	{ value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
-	{ value: "gemini-3-pro-preview", label: "Gemini 3.0 Pro Preview" },
 	{ value: "gemini-flash-latest", label: "Gemini Flash Latest" },
 	{ value: "grok-4-fast-reasoning", label: "Grok 4 Fast (Reasoning)" },
 	{ value: "grok-4-fast-non-reasoning", label: "Grok 4 Fast (Non-Reasoning)" },
 	{ value: "grok-4-0709", label: "Grok 4 0709" },
+	{ value: "grok-3-mini", label: "Grok 3 Mini" },
 ];
 
 app.registerExtension({
@@ -68,10 +68,6 @@ app.registerExtension({
 				let promptsDatabase = null;
 				let isDatabaseLoading = false;
 				let databaseLoadProgress = 0;
-
-				// Generation lock state (crash prevention)
-				let isGenerating = false;
-				let currentAbortController = null;
 
 				// AIL sync state
 				node._linkedAILNodeId = null;
@@ -801,6 +797,12 @@ app.registerExtension({
 										SDXL Mode
 									</label>
 								</div>
+								<div class="instaraw-rpg-control-group">
+									<label title="Bypass cache and generate fresh results (costs API credits)">
+										<input type="checkbox" class="instaraw-rpg-checkbox instaraw-rpg-force-regenerate-checkbox" />
+										🔄 Force Regenerate
+									</label>
+								</div>
 							</div>
 
 							<button class="instaraw-rpg-btn-primary instaraw-rpg-generate-creative-btn">✨ Generate & Add to Batch</button>
@@ -815,197 +817,163 @@ app.registerExtension({
 					`;
 				};
 
-			// === Unified Generate Tab ===
-			const renderGenerateTab = (uiState) => {
-				const promptQueue = uiState?.promptQueue || [];
-				const detectedMode = node._linkedAILMode || "txt2img";
-				const modelOptionsHtml = CREATIVE_MODEL_OPTIONS
-					.map(
-						(opt) => `<option value="${opt.value}" ${opt.value === (uiState?.currentCreativeModel || "gemini-2.5-pro") ? "selected" : ""}>${opt.label}</option>`
-					)
-					.join("");
-				const temperature = uiState?.currentCreativeTemperature ?? 0.9;
-				const topP = uiState?.currentCreativeTopP ?? 0.9;
+				// === Unified Generate Tab ===
+				const renderGenerateTab = (uiState) => {
+					const promptQueue = uiState?.promptQueue || [];
+					const detectedMode = node._linkedAILMode || "img2img";
+					const modelOptionsHtml = CREATIVE_MODEL_OPTIONS
+						.map(
+							(opt) => `<option value="${opt.value}" ${opt.value === (uiState?.currentCreativeModel || "gemini-2.5-pro") ? "selected" : ""}>${opt.label}</option>`
+						)
+						.join("");
+					const temperature = uiState?.currentCreativeTemperature ?? 0.9;
+					const topP = uiState?.currentCreativeTopP ?? 0.9;
 
-				// Character description - generated descriptions populate the character_text_input
-				const characterText = node.properties.character_text_input || "";
-				// Check if character_image is connected AND the source node still exists
-				const characterImageInput = node.inputs?.find(i => i.name === "character_image");
-				let hasCharacterImage = false;
-				if (characterImageInput && characterImageInput.link != null) {
-					const link = app.graph.links[characterImageInput.link];
-					if (link) {
-						const sourceNode = app.graph.getNodeById(link.origin_id);
-						hasCharacterImage = !!sourceNode; // Only true if node still exists
-					}
-				}
+					// Character likeness state
+					const characterDescription = node.properties.cached_character_description || "";
+					const characterCacheKey = node.properties.character_cache_key || "";
+					const isCached = characterDescription && characterCacheKey;
 
-				return `
-					<div class="instaraw-rpg-generate-unified">
-						<!-- Model Settings (TOP - affects ALL generation including character) -->
-						<div class="instaraw-rpg-section">
-							<div class="instaraw-rpg-section-header">
-								<span class="instaraw-rpg-section-label">⚙️ Model Settings</span>
-								<span class="instaraw-rpg-hint-text" style="font-size: 11px; color: #9ca3af;">Used for all generation</span>
-							</div>
-							<div class="instaraw-rpg-model-settings">
-								<div class="instaraw-rpg-model-row">
-									<label>Model</label>
-									<select class="instaraw-rpg-model-select">
-										${modelOptionsHtml}
-									</select>
-								</div>
-								<div class="instaraw-rpg-model-grid">
-									<div class="instaraw-rpg-model-control">
-										<label>Temperature</label>
-										<input type="number" class="instaraw-rpg-model-temp" value="${temperature}" min="0" max="2" step="0.01" />
-									</div>
-									<div class="instaraw-rpg-model-control">
-										<label>Top P</label>
-										<input type="number" class="instaraw-rpg-model-top-p" value="${topP}" min="0" max="1" step="0.01" />
-									</div>
-								</div>
-								<div class="instaraw-rpg-checkbox-row">
+					return `
+						<div class="instaraw-rpg-generate-unified">
+							<!-- Character Likeness Section -->
+							<div class="instaraw-rpg-section">
+								<div class="instaraw-rpg-section-header">
 									<label class="instaraw-rpg-checkbox-label">
-										<input type="checkbox" class="instaraw-rpg-checkbox instaraw-rpg-is-sdxl-checkbox" ${node.properties.is_sdxl ? 'checked' : ''} />
-										<span>SDXL Mode</span>
+										<input type="checkbox" class="instaraw-rpg-checkbox instaraw-rpg-enable-character-checkbox" ${node.properties.use_character_likeness ? 'checked' : ''} />
+										<span>Character Likeness</span>
 									</label>
+									<span class="instaraw-rpg-hint-badge">${isCached ? '✅ Cached' : '⚪ Not generated'}</span>
 								</div>
-							</div>
-						</div>
-
-						<!-- Character Consistency (Optional) -->
-						<div class="instaraw-rpg-section">
-							<div class="instaraw-rpg-section-header">
-								<label class="instaraw-rpg-checkbox-label">
-									<input type="checkbox" class="instaraw-rpg-checkbox instaraw-rpg-enable-character-checkbox" ${node.properties.use_character_likeness ? 'checked' : ''} />
-									<span>🎭 Character Consistency</span>
-								</label>
-								<span class="instaraw-rpg-hint-badge">${
-									!node.properties.use_character_likeness ? '⚪ Unused' :
-									characterText.trim() ? '✅ Active' : '⚠️ Empty'
-								}</span>
-							</div>
-							<div class="instaraw-rpg-character-section" style="display: ${node.properties.use_character_likeness ? 'block' : 'none'};">
-								${hasCharacterImage ? `
-									<div class="instaraw-rpg-info-banner" style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); padding: 8px 12px; border-radius: 4px; margin-bottom: 12px; font-size: 12px; color: #93c5fd;">
-										📸 <strong>Character Image Connected</strong> - Click "Generate from Image" to create description
+								<div class="instaraw-rpg-character-section" style="display: ${node.properties.use_character_likeness ? 'block' : 'none'};">
+									<div class="instaraw-rpg-control-group">
+										<label>Character Description</label>
+										<textarea class="instaraw-rpg-character-text-input" placeholder="Describe your character or leave empty to use character image from input..." rows="3">${escapeHtml(node.properties.character_text_input || "")}</textarea>
 									</div>
-								` : ''}
-								<div class="instaraw-rpg-control-group">
-									<label>Character Description</label>
-									<textarea class="instaraw-rpg-character-text-input instaraw-rpg-prompt-textarea" placeholder="blonde hair, blue eyes, athletic build, fair skin, delicate features..." style="line-height: 1.42; min-height: 60px; resize: vertical;">${escapeHtml(characterText)}</textarea>
-									<div class="instaraw-rpg-hint-text" style="margin-top: 8px; font-size: 11px; color: #9ca3af;">
-										💡 This description will be included in ALL generated prompts for character consistency
+									<div class="instaraw-rpg-character-actions">
+										<button class="instaraw-rpg-btn-secondary instaraw-rpg-generate-character-desc-btn">
+											${isCached ? '🔄 Refresh' : '✨ Generate'} Character Description
+										</button>
+										${isCached ? `<button class="instaraw-rpg-btn-text instaraw-rpg-view-character-desc-btn">👁️ View</button>` : ''}
 									</div>
-								</div>
-								<div class="instaraw-rpg-character-generation-settings">
-									<div class="instaraw-rpg-control-row" style="display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: center; margin-bottom: 12px;">
-										<label style="margin: 0; font-size: 12px;">Complexity</label>
-										<select class="instaraw-rpg-model-select instaraw-rpg-character-complexity">
-											<option value="concise" ${(node.properties.character_complexity || 'balanced') === 'concise' ? 'selected' : ''}>Concise (50-75 words)</option>
-											<option value="balanced" ${(node.properties.character_complexity || 'balanced') === 'balanced' ? 'selected' : ''}>Balanced (100-150 words)</option>
-											<option value="detailed" ${(node.properties.character_complexity || 'balanced') === 'detailed' ? 'selected' : ''}>Detailed (200-250 words)</option>
-										</select>
-									</div>
-									${hasCharacterImage ? `
-										<div class="instaraw-rpg-character-actions" style="margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
-											<button class="instaraw-rpg-btn-secondary instaraw-rpg-generate-character-desc-btn">
-												✨ Generate from Image
-											</button>
-											<span class="instaraw-rpg-hint-text" style="font-size: 11px; color: #9ca3af;">Uses connected character_image and selected model above</span>
+									${characterDescription ? `
+										<div class="instaraw-rpg-character-preview">
+											<strong>Current Description:</strong>
+											<p class="instaraw-rpg-character-desc-text">${escapeHtml(characterDescription.substring(0, 150))}${characterDescription.length > 150 ? '...' : ''}</p>
 										</div>
 									` : ''}
-									<details class="instaraw-rpg-advanced-settings" style="margin-top: 12px; padding: 12px; background: #1f2937; border: 1px solid #4b5563; border-radius: 4px;">
-										<summary style="cursor: pointer; font-weight: 500; font-size: 12px; color: #9ca3af; user-select: none;">⚙️ Advanced: Edit System Prompt</summary>
-										<div style="margin-top: 12px;">
-											<textarea class="instaraw-rpg-character-system-prompt instaraw-rpg-prompt-textarea" style="font-family: monospace; font-size: 11px; line-height: 1.5; min-height: 80px; resize: vertical; width: 100%;">${escapeHtml(node.properties.character_system_prompt || getCharacterSystemPrompt(node.properties.character_complexity || "balanced"))}</textarea>
-											<div style="display: flex; align-items: center; justify-content: space-between; margin-top: 8px;">
-												<div class="instaraw-rpg-hint-text" style="font-size: 10px; color: #9ca3af;">
-													💡 Custom edits override complexity setting
-												</div>
-												<button class="instaraw-rpg-btn-text instaraw-rpg-reset-system-prompt-btn" style="font-size: 11px; padding: 4px 8px;">🔄 Reset</button>
+								</div>
+							</div>
+
+							<!-- Mode Detection & Settings -->
+							<div class="instaraw-rpg-section">
+								<div class="instaraw-rpg-section-header">
+									<span class="instaraw-rpg-mode-badge ${detectedMode === 'img2img' ? 'instaraw-rpg-mode-img2img' : 'instaraw-rpg-mode-txt2img'}">
+										${detectedMode === 'img2img' ? '🖼️ IMG2IMG' : '🎨 TXT2IMG'}
+									</span>
+									<span class="instaraw-rpg-hint-text">Detected from ${node._linkedAILNodeId ? `AIL #${node._linkedAILNodeId}` : 'Advanced Image Loader'}</span>
+								</div>
+
+								<!-- img2img: Affect Elements -->
+								${detectedMode === 'img2img' ? `
+									<div class="instaraw-rpg-affect-elements">
+										<label class="instaraw-rpg-section-label">Affect Elements (unchecked = describe as-is)</label>
+										<div class="instaraw-rpg-checkbox-grid">
+											<label class="instaraw-rpg-checkbox-label">
+												<input type="checkbox" class="instaraw-rpg-checkbox instaraw-rpg-affect-background" />
+												<span>Background</span>
+											</label>
+											<label class="instaraw-rpg-checkbox-label">
+												<input type="checkbox" class="instaraw-rpg-checkbox instaraw-rpg-affect-outfit" />
+												<span>Outfit</span>
+											</label>
+											<label class="instaraw-rpg-checkbox-label">
+												<input type="checkbox" class="instaraw-rpg-checkbox instaraw-rpg-affect-pose" />
+												<span>Pose</span>
+											</label>
+											<label class="instaraw-rpg-checkbox-label">
+												<input type="checkbox" class="instaraw-rpg-checkbox instaraw-rpg-affect-lighting" />
+												<span>Lighting</span>
+											</label>
+										</div>
+									</div>
+								` : `
+									<!-- txt2img: User Input & Library Inspiration -->
+									<div class="instaraw-rpg-txt2img-settings">
+										<div class="instaraw-rpg-control-group">
+											<label>User Input (optional)</label>
+											<textarea class="instaraw-rpg-user-text-input" placeholder="Describe what you want to generate or leave empty to use only library prompts..." rows="3">${escapeHtml(node.properties.user_text_input || "")}</textarea>
+										</div>
+										<div class="instaraw-rpg-library-controls">
+											<label>Library Inspiration</label>
+											<div class="instaraw-rpg-control-row">
+												<input type="number" class="instaraw-rpg-number-input instaraw-rpg-inspiration-count" value="${node.properties.inspiration_count || 3}" min="0" max="10" />
+												<span>random prompts</span>
+												<button class="instaraw-rpg-btn-text instaraw-rpg-preview-random-btn">🎲 Preview</button>
 											</div>
 										</div>
-									</details>
-								</div>
-							</div>
-						</div>
-
-						<!-- Mode Detection & Settings -->
-						<div class="instaraw-rpg-section">
-							<div class="instaraw-rpg-section-header">
-								<span class="instaraw-rpg-mode-badge ${detectedMode === 'img2img' ? 'instaraw-rpg-mode-img2img' : 'instaraw-rpg-mode-txt2img'}">
-									${detectedMode === 'img2img' ? '🖼️ IMG2IMG' : '🎨 TXT2IMG'}
-								</span>
-								<span class="instaraw-rpg-hint-text">Detected from ${node._linkedAILNodeId ? `AIL #${node._linkedAILNodeId}` : 'workflow'}</span>
+									</div>
+								`}
 							</div>
 
-							<!-- img2img: Affect Elements -->
-							${detectedMode === 'img2img' ? `
-								<div class="instaraw-rpg-affect-elements">
-									<label class="instaraw-rpg-section-label">Affect Elements (unchecked = describe as-is)</label>
-									<div class="instaraw-rpg-checkbox-grid">
-										<label class="instaraw-rpg-checkbox-label">
-											<input type="checkbox" class="instaraw-rpg-checkbox instaraw-rpg-affect-background" />
-											<span>Background</span>
-										</label>
-										<label class="instaraw-rpg-checkbox-label">
-											<input type="checkbox" class="instaraw-rpg-checkbox instaraw-rpg-affect-outfit" />
-											<span>Outfit</span>
-										</label>
-										<label class="instaraw-rpg-checkbox-label">
-											<input type="checkbox" class="instaraw-rpg-checkbox instaraw-rpg-affect-pose" />
-											<span>Pose</span>
-										</label>
-										<label class="instaraw-rpg-checkbox-label">
-											<input type="checkbox" class="instaraw-rpg-checkbox instaraw-rpg-affect-lighting" />
-											<span>Lighting</span>
-										</label>
-									</div>
+							<!-- Model Settings -->
+							<div class="instaraw-rpg-section">
+								<div class="instaraw-rpg-section-header">
+									<span class="instaraw-rpg-section-label">Model Settings</span>
 								</div>
-							` : `
-								<!-- txt2img: User Input & Library Inspiration -->
-								<div class="instaraw-rpg-txt2img-settings">
-									<div class="instaraw-rpg-control-group">
-										<label>User Input (optional)</label>
-										<textarea class="instaraw-rpg-user-text-input instaraw-rpg-prompt-textarea" placeholder="Describe what you want to generate or leave empty to use only library prompts..." rows="3" style="line-height: 1.42;">${escapeHtml(node.properties.user_text_input || "")}</textarea>
+								<div class="instaraw-rpg-model-settings">
+									<div class="instaraw-rpg-model-row">
+										<label>Model</label>
+										<select class="instaraw-rpg-model-select">
+											${modelOptionsHtml}
+										</select>
 									</div>
-									<div class="instaraw-rpg-library-controls">
-										<label>Library Inspiration</label>
-										<div class="instaraw-rpg-control-row">
-											<input type="number" class="instaraw-rpg-number-input instaraw-rpg-inspiration-count" value="${node.properties.inspiration_count || 3}" min="0" max="10" />
-											<span>random prompts</span>
-											<button class="instaraw-rpg-btn-text instaraw-rpg-preview-random-btn">🎲 Preview</button>
+									<div class="instaraw-rpg-model-grid">
+										<div class="instaraw-rpg-model-control">
+											<label>Temperature</label>
+											<input type="number" class="instaraw-rpg-model-temp" value="${temperature}" min="0" max="2" step="0.01" />
+										</div>
+										<div class="instaraw-rpg-model-control">
+											<label>Top P</label>
+											<input type="number" class="instaraw-rpg-model-top-p" value="${topP}" min="0" max="1" step="0.01" />
 										</div>
 									</div>
+									<div class="instaraw-rpg-checkbox-row">
+										<label class="instaraw-rpg-checkbox-label">
+											<input type="checkbox" class="instaraw-rpg-checkbox instaraw-rpg-is-sdxl-checkbox" ${node.properties.is_sdxl ? 'checked' : ''} />
+											<span>SDXL Mode</span>
+										</label>
+										<label class="instaraw-rpg-checkbox-label" title="Bypass cache and generate fresh results">
+											<input type="checkbox" class="instaraw-rpg-checkbox instaraw-rpg-force-regenerate-checkbox" />
+											<span>🔄 Force Regenerate</span>
+										</label>
+									</div>
 								</div>
-							`}
-						</div>
+							</div>
 
-						<!-- Generation Count -->
-						<div class="instaraw-rpg-section">
-							<div class="instaraw-rpg-control-group">
-								<label>Generation Count</label>
-								<input type="number" class="instaraw-rpg-number-input instaraw-rpg-gen-count-input" value="${node.properties.generation_count || 5}" min="1" max="50" />
+							<!-- Generation Count -->
+							<div class="instaraw-rpg-section">
+								<div class="instaraw-rpg-control-group">
+									<label>Generation Count</label>
+									<input type="number" class="instaraw-rpg-number-input instaraw-rpg-gen-count-input" value="${node.properties.generation_count || 5}" min="1" max="50" />
+								</div>
+							</div>
+
+							<!-- Generate Button -->
+							<button class="instaraw-rpg-btn-primary instaraw-rpg-generate-unified-btn">
+								${detectedMode === 'img2img' ? '🖼️' : '🎨'} Generate Prompts
+							</button>
+
+							<!-- Preview Section -->
+							<div class="instaraw-rpg-generate-preview" style="display: none;">
+								<h4>Generated Prompts Preview</h4>
+								<div class="instaraw-rpg-generate-preview-list"></div>
+								<button class="instaraw-rpg-btn-primary instaraw-rpg-accept-generated-btn">✓ Add to Batch</button>
+								<button class="instaraw-rpg-btn-secondary instaraw-rpg-cancel-generated-btn">✖ Cancel</button>
 							</div>
 						</div>
-
-						<!-- Generate Button -->
-						<button class="instaraw-rpg-btn-primary instaraw-rpg-generate-unified-btn">
-							${detectedMode === 'img2img' ? '🖼️' : '🎨'} Generate Prompts
-						</button>
-
-						<!-- Preview Section -->
-						<div class="instaraw-rpg-generate-preview" style="display: none;">
-							<h4>Generated Prompts Preview</h4>
-							<div class="instaraw-rpg-generate-preview-list"></div>
-							<button class="instaraw-rpg-btn-primary instaraw-rpg-accept-generated-btn">✓ Add to Batch</button>
-							<button class="instaraw-rpg-btn-secondary instaraw-rpg-cancel-generated-btn">✖ Cancel</button>
-						</div>
-					</div>
-				`;
-			};
+					`;
+				};
 
 				// === Character Tab (LEGACY - Will be removed) ===
 				const renderCharacterTab = () => {
@@ -1030,6 +998,12 @@ app.registerExtension({
 									<label>
 										<input type="checkbox" class="instaraw-rpg-checkbox instaraw-rpg-char-is-sdxl-checkbox" />
 										SDXL Mode
+									</label>
+								</div>
+								<div class="instaraw-rpg-control-group">
+									<label title="Bypass cache and generate fresh results (costs API credits)">
+										<input type="checkbox" class="instaraw-rpg-checkbox instaraw-rpg-char-force-regenerate-checkbox" />
+										🔄 Force Regenerate
 									</label>
 								</div>
 							</div>
@@ -1535,12 +1509,13 @@ app.registerExtension({
 					const genCountInput = container.querySelector(".instaraw-rpg-gen-count-input");
 					const inspirationCountInput = container.querySelector(".instaraw-rpg-inspiration-count-input");
 					const isSDXLCheckbox = container.querySelector(".instaraw-rpg-is-sdxl-checkbox");
+					const forceRegenerateCheckbox = container.querySelector(".instaraw-rpg-force-regenerate-checkbox");
 					const generateBtn = container.querySelector(".instaraw-rpg-generate-creative-btn");
 
 					const generationCount = parseInt(genCountInput?.value || "5");
 					const inspirationCount = parseInt(inspirationCountInput?.value || "3");
 					const isSDXL = isSDXLCheckbox?.checked || false;
-					const forceRegenerate = true; // Always regenerate
+					const forceRegenerate = forceRegenerateCheckbox?.checked || false;
 
 					const promptQueue = parsePromptBatch();
 					const sourcePrompts = promptQueue.filter((p) => p.source_id).slice(0, inspirationCount);
@@ -1588,16 +1563,10 @@ app.registerExtension({
 						return;
 					}
 
-					// Disable button and show loading progress bar
+					// Disable button and show loading
 					if (generateBtn) {
 						generateBtn.disabled = true;
-						const originalText = generateBtn.textContent;
-						generateBtn.style.position = 'relative';
-						generateBtn.style.overflow = 'hidden';
-						generateBtn.innerHTML = `
-							${originalText}
-							<div class="instaraw-rpg-progress-bar-loading"></div>
-						`;
+						generateBtn.textContent = "⏳ Generating...";
 					}
 
 					console.log("[RPG] Making API request to /instaraw/generate_creative_prompts");
@@ -1670,7 +1639,7 @@ app.registerExtension({
 								previewSection.style.display = "block";
 								// Store generated prompts temporarily
 								node._generatedCreativePrompts = result.prompts;
-								// DON'T call setupEventHandlers() - already set up by renderUI()
+								setupEventHandlers();
 							}
 						} else {
 							throw new Error(result.error || "Unknown error");
@@ -1724,12 +1693,13 @@ app.registerExtension({
 					const charRefInput = container.querySelector(".instaraw-rpg-character-ref-input");
 					const genCountInput = container.querySelector(".instaraw-rpg-char-gen-count-input");
 					const isSDXLCheckbox = container.querySelector(".instaraw-rpg-char-is-sdxl-checkbox");
+					const forceRegenerateCheckbox = container.querySelector(".instaraw-rpg-char-force-regenerate-checkbox");
 					const generateBtn = container.querySelector(".instaraw-rpg-generate-character-btn");
 
 					const characterReference = charRefInput?.value || "";
 					const generationCount = parseInt(genCountInput?.value || "5");
 					const isSDXL = isSDXLCheckbox?.checked || false;
-					const forceRegenerate = true; // Always regenerate
+					const forceRegenerate = forceRegenerateCheckbox?.checked || false;
 
 					const modelWidget = node.widgets?.find((w) => w.name === "creative_model");
 					const model = modelWidget?.value || node.properties.creative_model || "gemini-2.5-pro";
@@ -1780,16 +1750,10 @@ app.registerExtension({
 						return;
 					}
 
-					// Disable button and show loading progress bar
+					// Disable button and show loading
 					if (generateBtn) {
 						generateBtn.disabled = true;
-						const originalText = generateBtn.textContent;
-						generateBtn.style.position = 'relative';
-						generateBtn.style.overflow = 'hidden';
-						generateBtn.innerHTML = `
-							${originalText}
-							<div class="instaraw-rpg-progress-bar-loading"></div>
-						`;
+						generateBtn.textContent = "⏳ Generating...";
 					}
 
 					console.log("[RPG] Making API request to /instaraw/generate_creative_prompts (character mode)");
@@ -1855,7 +1819,7 @@ app.registerExtension({
 								previewSection.style.display = "block";
 								// Store generated prompts temporarily
 								node._generatedCharacterPrompts = result.prompts;
-								// DON'T call setupEventHandlers() - already set up by renderUI()
+								setupEventHandlers();
 							}
 						} else {
 							throw new Error(result.error || "Unknown error");
@@ -1905,44 +1869,9 @@ app.registerExtension({
 				// === UNIFIED GENERATE TAB FUNCTIONS ===
 				// ========================================
 
-				// === Get Default Character System Prompt (mirrors backend logic) ===
-				const getCharacterSystemPrompt = (complexity = "balanced") => {
-					const baseInstruction = `You are an expert at analyzing images and generating character descriptions for image generation prompts.
-
-Generate a character description focusing on PERMANENT physical features:
-- Facial features (face shape, eyes, nose, lips, skin tone)
-- Hair (color, length, style, texture)
-- Body type and build
-- Age and ethnicity
-- Distinctive features (scars, tattoos, piercings, etc.)
-
-DO NOT include clothing, background, pose, or temporary features.
-DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
-
-					let lengthInstruction;
-					if (complexity === "concise") {
-						lengthInstruction = "\nOUTPUT: A concise description (50-75 words) focusing only on the most essential and distinctive physical features.";
-					} else if (complexity === "detailed") {
-						lengthInstruction = "\nOUTPUT: A comprehensive, detailed description (200-250 words) covering all physical aspects with nuanced detail and specific characteristics.";
-					} else {  // balanced
-						lengthInstruction = "\nOUTPUT: A balanced description (100-150 words) covering key physical features in natural language.";
-					}
-
-					return baseInstruction + lengthInstruction;
-				};
-
 				// === Generate Character Description (from image or text) ===
 				const generateCharacterDescription = async () => {
-					// CRASH PREVENTION: Check if already generating
-					if (isGenerating) {
-						console.warn("[RPG] ⚠️ Generation already in progress, ignoring request");
-						return;
-					}
-
 					console.group("[RPG] 🎨 Generate Character Description - START");
-
-					// Set generation lock
-					isGenerating = true;
 
 					const generateBtn = container.querySelector(".instaraw-rpg-generate-character-desc-btn");
 					const characterTextInput = container.querySelector(".instaraw-rpg-character-text-input");
@@ -1959,144 +1888,49 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 						return;
 					}
 
-					// Check if character_image input is connected
-					const characterImageInput = node.inputs?.find(i => i.name === "character_image");
-					let imageData = null;
-
-					if (characterImageInput && characterImageInput.link != null) {
-						console.log("[RPG] Character image input connected, reading image...");
-
-						try {
-							// Get the connected node
-							const link = app.graph.links[characterImageInput.link];
-							if (link) {
-								const sourceNode = app.graph.getNodeById(link.origin_id);
-								console.log("[RPG] Source node type:", sourceNode?.type);
-
-								if (sourceNode && sourceNode.type === "LoadImage") {
-									// Get the image filename from the LoadImage node
-									const imageWidget = sourceNode.widgets?.find(w => w.name === "image");
-									const filename = imageWidget?.value;
-
-									if (filename) {
-										console.log("[RPG] Loading image:", filename);
-
-										// Fetch the image from ComfyUI's view endpoint
-										const imageUrl = `/view?filename=${encodeURIComponent(filename)}&type=input`;
-										const response = await fetch(imageUrl);
-										const blob = await response.blob();
-
-										// Convert to base64
-										const base64 = await new Promise((resolve) => {
-											const reader = new FileReader();
-											reader.onloadend = () => resolve(reader.result);
-											reader.readAsDataURL(blob);
-										});
-
-										imageData = base64;
-										console.log("[RPG] ✅ Image loaded and converted to base64");
-									} else {
-										console.warn("[RPG] No image selected in LoadImage node");
-									}
-								} else if (sourceNode) {
-									console.warn("[RPG] Connected node is not LoadImage, type:", sourceNode.type);
-								}
-							}
-						} catch (error) {
-							console.error("[RPG] Error reading character image:", error);
-							alert(`Could not read character image: ${error.message}`);
-							return;
-						}
-					}
-
-					// Require either image or text
-					if (!imageData && !characterText) {
-						alert("Please either:\n1. Connect a Load Image node to character_image input, OR\n2. Enter character description text");
-						console.groupEnd();
-						return;
-					}
-
-					// Disable button and show loading progress bar
+					// Disable button and show loading
 					if (generateBtn) {
 						generateBtn.disabled = true;
-						const originalText = generateBtn.textContent;
-						generateBtn.style.position = 'relative';
-						generateBtn.style.overflow = 'hidden';
-						generateBtn.innerHTML = `
-							${originalText}
-							<div class="instaraw-rpg-progress-bar-loading"></div>
-						`;
+						generateBtn.textContent = "⏳ Generating...";
 					}
 
 					try {
-						// Get complexity and custom system prompt from properties
-						const complexity = node.properties.character_complexity || "balanced";
-						const customSystemPrompt = node.properties.character_system_prompt?.trim() || "";
-
-						console.log("[RPG] Sending character description request:", {
-							hasImage: !!imageData,
-							hasText: !!characterText,
-							model: node.properties.creative_model || "gemini-2.5-pro",
-							complexity: complexity,
-							hasCustomSystemPrompt: !!customSystemPrompt
-						});
-
 						const response = await api.fetchApi("/instaraw/generate_character_description", {
 							method: "POST",
 							headers: { "Content-Type": "application/json" },
 							body: JSON.stringify({
-								character_image: imageData,
 								character_text: characterText,
 								gemini_api_key: geminiApiKey,
 								grok_api_key: grokApiKey,
-								model: node.properties.creative_model || "gemini-2.5-pro",
-								complexity: complexity,
-								custom_system_prompt: customSystemPrompt,
-								force_regenerate: true  // Always force regenerate to bypass bad cache
+								model: node.properties.creative_model || "gemini-2.5-pro"
 							}),
 						});
 
 						const result = await parseJSONResponse(response);
-						console.log("[RPG] Character description API response:", result);
 
 						if (!response.ok) {
 							throw new Error(result?.error || `Character description API error ${response.status}`);
 						}
 
-						if (result.success) {
-							if (!result.description || result.description.trim() === "") {
-								throw new Error("API returned empty description. Check backend logs for details.");
-							}
+						if (result.success && result.description) {
+							console.log(`[RPG] ✅ Character description generated successfully`);
 
-							console.log(`[RPG] ✅ Character description generated successfully (${result.description.length} chars)`);
+							// Store character description in node properties
+							node.properties.cached_character_description = result.description;
+							node.properties.character_cache_key = result.cache_key || Date.now().toString();
 
-							// Populate the character text input with the generated description
-							node.properties.character_text_input = result.description;
-
-							// Update textarea directly (don't call renderUI to avoid event handler duplication)
-							if (characterTextInput) {
-								characterTextInput.value = result.description;
-								autoResizeTextarea(characterTextInput);
-							}
-
-							// Mark canvas as dirty to save changes
-							app.graph.setDirtyCanvas(true, true);
+							// Re-render to show updated description
+							renderUI();
 						} else {
-							throw new Error(result.error || "API returned success=false");
+							throw new Error(result.error || "Unknown error");
 						}
 					} catch (error) {
 						console.error("[RPG] ❌ Error during character description generation:", error);
 						alert(`Character description error: ${error.message || error}`);
 					} finally {
-						// CRASH PREVENTION: Always release generation lock
-						isGenerating = false;
-
-						// Reset button
 						if (generateBtn) {
 							generateBtn.disabled = false;
-							generateBtn.style.position = '';
-							generateBtn.style.overflow = '';
-							generateBtn.textContent = "✨ Generate from Image";
+							generateBtn.textContent = "✨ Generate Character Description";
 						}
 						console.groupEnd();
 					}
@@ -2109,6 +1943,7 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 
 					const generateBtn = container.querySelector(".instaraw-rpg-generate-unified-btn");
 					const genCountInput = container.querySelector(".instaraw-rpg-gen-count-input");
+					const forceRegenerateCheckbox = container.querySelector(".instaraw-rpg-force-regenerate-checkbox");
 					const isSDXLCheckbox = container.querySelector(".instaraw-rpg-is-sdxl-checkbox");
 
 					// Character settings
@@ -2116,8 +1951,7 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 					const characterTextInput = container.querySelector(".instaraw-rpg-character-text-input");
 					const useCharacter = enableCharacterCheckbox?.checked || false;
 					const characterText = characterTextInput?.value?.trim() || "";
-					// Use character_text_input directly - generated descriptions populate this field
-					const characterDescription = characterText;
+					const characterDescription = node.properties.cached_character_description || characterText;
 
 					// Detect mode from AIL
 					const detectedMode = node._linkedAILMode || "txt2img";
@@ -2125,7 +1959,7 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 
 					// Common settings
 					const generationCount = parseInt(genCountInput?.value || "5");
-					const forceRegenerate = true; // Always regenerate
+					const forceRegenerate = forceRegenerateCheckbox?.checked || false;
 					const isSDXL = isSDXLCheckbox?.checked || false;
 
 					// Mode-specific settings
@@ -2188,16 +2022,10 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 						return;
 					}
 
-					// Disable button and show loading progress bar
+					// Disable button and show loading
 					if (generateBtn) {
 						generateBtn.disabled = true;
-						const originalText = generateBtn.textContent;
-						generateBtn.style.position = 'relative';
-						generateBtn.style.overflow = 'hidden';
-						generateBtn.innerHTML = `
-							${originalText}
-							<div class="instaraw-rpg-progress-bar-loading"></div>
-						`;
+						generateBtn.textContent = "⏳ Generating...";
 					}
 
 					try {
@@ -2452,39 +2280,35 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 					});
 
 					// Toggle tags buttons (expand/collapse) - use event delegation
-					// Only add listener once to prevent accumulation
-					if (!container._hasToggleTagsListener) {
-						container._hasToggleTagsListener = true;
-						container.addEventListener('click', (e) => {
-							if (e.target.classList.contains('instaraw-rpg-toggle-tags-btn')) {
-								e.stopPropagation();
-								const promptId = e.target.dataset.id;
-								const card = e.target.closest('.instaraw-rpg-library-card');
-								const tagsContainer = card.querySelector('.instaraw-rpg-library-card-tags');
-								const prompt = promptsDatabase.find(p => p.id === promptId);
+					container.addEventListener('click', (e) => {
+						if (e.target.classList.contains('instaraw-rpg-toggle-tags-btn')) {
+							e.stopPropagation();
+							const promptId = e.target.dataset.id;
+							const card = e.target.closest('.instaraw-rpg-library-card');
+							const tagsContainer = card.querySelector('.instaraw-rpg-library-card-tags');
+							const prompt = promptsDatabase.find(p => p.id === promptId);
 
-								if (prompt && tagsContainer) {
-									const isExpanded = tagsContainer.getAttribute('data-expanded') === 'true';
-									const filters = JSON.parse(node.properties.library_filters || "{}");
-									const searchQuery = filters.search_query?.trim() || "";
+							if (prompt && tagsContainer) {
+								const isExpanded = tagsContainer.getAttribute('data-expanded') === 'true';
+								const filters = JSON.parse(node.properties.library_filters || "{}");
+								const searchQuery = filters.search_query?.trim() || "";
 
-									if (isExpanded) {
-										// Collapse - show only first 5
-										tagsContainer.setAttribute('data-expanded', 'false');
-										tagsContainer.innerHTML = prompt.tags.slice(0, 5)
-											.map(tag => `<span class="instaraw-rpg-tag">${highlightSearchTerm(tag, searchQuery)}</span>`)
-											.join("") + ` <button class="instaraw-rpg-toggle-tags-btn" data-id="${promptId}">+${prompt.tags.length - 5}</button>`;
-									} else {
-										// Expand - show all tags
-										tagsContainer.setAttribute('data-expanded', 'true');
-										tagsContainer.innerHTML = prompt.tags
-											.map(tag => `<span class="instaraw-rpg-tag">${highlightSearchTerm(tag, searchQuery)}</span>`)
-											.join("") + ` <button class="instaraw-rpg-toggle-tags-btn" data-id="${promptId}">Show less</button>`;
-									}
+								if (isExpanded) {
+									// Collapse - show only first 5
+									tagsContainer.setAttribute('data-expanded', 'false');
+									tagsContainer.innerHTML = prompt.tags.slice(0, 5)
+										.map(tag => `<span class="instaraw-rpg-tag">${highlightSearchTerm(tag, searchQuery)}</span>`)
+										.join("") + ` <button class="instaraw-rpg-toggle-tags-btn" data-id="${promptId}">+${prompt.tags.length - 5}</button>`;
+								} else {
+									// Expand - show all tags
+									tagsContainer.setAttribute('data-expanded', 'true');
+									tagsContainer.innerHTML = prompt.tags
+										.map(tag => `<span class="instaraw-rpg-tag">${highlightSearchTerm(tag, searchQuery)}</span>`)
+										.join("") + ` <button class="instaraw-rpg-toggle-tags-btn" data-id="${promptId}">Show less</button>`;
 								}
 							}
-						});
-					}
+						}
+					});
 
 					// Pagination
 					container.querySelectorAll(".instaraw-rpg-prev-page-btn").forEach((prevPageBtn) => {
@@ -2666,59 +2490,11 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 						};
 					}
 
-					// Character text input (save on change + auto-resize)
+					// Character text input (save on change)
 					const characterTextInput = container.querySelector(".instaraw-rpg-character-text-input");
 					if (characterTextInput) {
-						autoResizeTextarea(characterTextInput);
-						characterTextInput.oninput = (e) => autoResizeTextarea(characterTextInput);
 						characterTextInput.onchange = (e) => {
 							node.properties.character_text_input = e.target.value;
-							app.graph.setDirtyCanvas(true, true);
-						};
-					}
-
-					// Character complexity dropdown
-					const characterComplexitySelect = container.querySelector(".instaraw-rpg-character-complexity");
-					if (characterComplexitySelect) {
-						characterComplexitySelect.onchange = (e) => {
-							node.properties.character_complexity = e.target.value;
-
-							// If no custom system prompt, update the textarea to show new default
-							const systemPromptTextarea = container.querySelector(".instaraw-rpg-character-system-prompt");
-							if (systemPromptTextarea && !node.properties.character_system_prompt) {
-								systemPromptTextarea.value = getCharacterSystemPrompt(e.target.value);
-								autoResizeTextarea(systemPromptTextarea);
-							}
-
-							app.graph.setDirtyCanvas(true, true);
-						};
-					}
-
-					// Character system prompt textarea (advanced)
-					const characterSystemPromptInput = container.querySelector(".instaraw-rpg-character-system-prompt");
-					if (characterSystemPromptInput) {
-						autoResizeTextarea(characterSystemPromptInput);
-						characterSystemPromptInput.oninput = (e) => autoResizeTextarea(characterSystemPromptInput);
-						characterSystemPromptInput.onchange = (e) => {
-							node.properties.character_system_prompt = e.target.value;
-							app.graph.setDirtyCanvas(true, true);
-						};
-					}
-
-					// Reset system prompt button
-					const resetSystemPromptBtn = container.querySelector(".instaraw-rpg-reset-system-prompt-btn");
-					if (resetSystemPromptBtn) {
-						resetSystemPromptBtn.onclick = () => {
-							const complexity = node.properties.character_complexity || "balanced";
-							const defaultPrompt = getCharacterSystemPrompt(complexity);
-
-							// Clear custom prompt and update textarea
-							node.properties.character_system_prompt = "";
-							if (characterSystemPromptInput) {
-								characterSystemPromptInput.value = defaultPrompt;
-								autoResizeTextarea(characterSystemPromptInput);
-							}
-
 							app.graph.setDirtyCanvas(true, true);
 						};
 					}
@@ -2786,10 +2562,6 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 						let draggedItem = null;
 
 						items.forEach((item) => {
-						// Skip if already has drag listeners to prevent accumulation
-						if (item._hasDragListeners) return;
-						item._hasDragListeners = true;
-
 						item.addEventListener("dragstart", (e) => {
 							draggedItem = item;
 							item.style.opacity = "0.5";
@@ -2841,11 +2613,8 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 				};
 
 				// === AIL Update Listener ===
-				// Only add once to prevent accumulation
-				if (!window._hasRPGAILListener) {
-					window._hasRPGAILListener = true;
-					window.addEventListener("INSTARAW_AIL_UPDATED", (event) => {
-						const { nodeId, images, latents, total, mode, enable_img2img } = event.detail;
+				window.addEventListener("INSTARAW_AIL_UPDATED", (event) => {
+					const { nodeId, images, latents, total, mode, enable_img2img } = event.detail;
 					node._linkedAILNodeId = nodeId;
 					node._linkedAILMode = mode || (enable_img2img ? "img2img" : "txt2img");
 
@@ -2867,8 +2636,7 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 					if (widget) widget.value = total;
 
 					renderUI();
-					});
-				}
+				});
 
 				// === Add DOM Widget (Exact AIL Pattern) ===
 				const widget = node.addDOMWidget("rpg_display", "rpgpromptmanager", container, {
@@ -2966,17 +2734,6 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 					if (this._setupWidgetCallbacks) this._setupWidgetCallbacks();
 					if (this._renderUI) this._renderUI();
 				}, 200);
-			};
-
-			// === onConnectionsChange Hook (for character_image reactivity) ===
-			const onConnectionsChange = nodeType.prototype.onConnectionsChange;
-			nodeType.prototype.onConnectionsChange = function(side, slot, connect, link_info, output) {
-				const result = onConnectionsChange?.apply(this, arguments);
-				// Re-render when character_image connection changes
-				if (this._renderUI) {
-					setTimeout(() => this._renderUI(), 50);
-				}
-				return result;
 			};
 		}
 	},

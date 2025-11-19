@@ -465,6 +465,232 @@ async def generate_creative_prompts_options(request):
 # In-memory cache for character descriptions
 CHARACTER_DESCRIPTION_CACHE = {}
 
+def get_character_system_prompt(complexity="balanced"):
+    """
+    Generate system prompt based on complexity level.
+    Complexity levels: concise (50-75 words), balanced (100-150 words), detailed (200-250 words)
+    """
+    base_instruction = """You are an expert at analyzing images and generating character descriptions for image generation prompts.
+
+Generate a character description focusing on PERMANENT physical features:
+- Facial features (face shape, eyes, nose, lips, skin tone)
+- Hair (color, length, style, texture)
+- Body type and build
+- Age and ethnicity
+- Distinctive features (scars, tattoos, piercings, etc.)
+
+DO NOT include clothing, background, pose, or temporary features.
+DO NOT use tags like "1girl, solo" or similar categorization prefixes."""
+
+    if complexity == "concise":
+        length_instruction = "\nOUTPUT: A concise description (50-75 words) focusing only on the most essential and distinctive physical features."
+    elif complexity == "detailed":
+        length_instruction = "\nOUTPUT: A comprehensive, detailed description (200-250 words) covering all physical aspects with nuanced detail and specific characteristics."
+    else:  # balanced
+        length_instruction = "\nOUTPUT: A balanced description (100-150 words) covering key physical features in natural language."
+
+    return base_instruction + length_instruction
+
+
+async def generate_character_description_with_gemini(user_prompt, model="gemini-2.5-pro", api_key=None, character_image=None, complexity="balanced", custom_system_prompt=None, temperature=0.7, top_p=0.9):
+    """
+    Generate plain text character description using Gemini.
+    Returns raw text, not JSON.
+    Uses the NEW Google Genai SDK pattern (matching gemini_native.py)
+    """
+    try:
+        from google import genai
+        from google.genai import types
+        import base64
+    except ImportError:
+        raise ImportError("The 'google-genai' library is required. Run: pip install -U google-genai")
+
+    if not api_key or api_key.strip() == "":
+        api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key or api_key.strip() == "":
+        raise ValueError("Gemini API Key is missing")
+
+    try:
+        # NEW SDK pattern: use Client instead of configure()
+        client = genai.Client(api_key=api_key)
+
+        # Use custom system prompt if provided, otherwise generate based on complexity
+        if custom_system_prompt:
+            system_instruction = custom_system_prompt
+        else:
+            system_instruction = get_character_system_prompt(complexity)
+
+        # Build parts list (text + optional image)
+        parts = [types.Part.from_text(text=f"{system_instruction}\n\n{user_prompt}")]
+
+        # Add image if provided (matching gemini_native.py pattern)
+        if character_image:
+            # Extract base64 data (remove data URL prefix if present)
+            if character_image.startswith("data:"):
+                base64_data = character_image.split(",", 1)[1]
+            else:
+                base64_data = character_image
+
+            # Decode base64 to bytes
+            image_bytes = base64.b64decode(base64_data)
+            parts.append(types.Part.from_bytes(data=image_bytes, mime_type='image/png'))
+
+        contents = [types.Content(role="user", parts=parts)]
+
+        # Safety settings
+        safety_settings = [
+            types.SafetySetting(category=cat, threshold="BLOCK_NONE")
+            for cat in ["HARM_CATEGORY_HATE_SPEECH", "HARM_CATEGORY_DANGEROUS_CONTENT",
+                       "HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_SEXUALLY_EXPLICIT"]
+        ]
+
+        # Generation config with thinking support
+        # Gemini 3.0 uses thinking_level (HIGH/LOW), Gemini 2.5 uses thinking_budget
+        if model == "gemini-3-pro-preview":
+            # Gemini 3.0 format
+            thinking_config = types.ThinkingConfig(thinking_level="HIGH")
+        elif model == "gemini-2.5-pro":
+            # Gemini 2.5 format (unlimited thinking)
+            thinking_config = types.ThinkingConfig(thinking_budget=-1)
+        else:
+            # No thinking for other models
+            thinking_config = None
+
+        config_params = {
+            "temperature": temperature,
+            "top_p": top_p,
+            "candidate_count": 1,
+            "safety_settings": safety_settings
+        }
+
+        # Only add thinking_config if it's not None
+        if thinking_config:
+            config_params["thinking_config"] = thinking_config
+
+        config = types.GenerateContentConfig(**config_params)
+
+        # NEW SDK pattern: use client.models.generate_content()
+        response = client.models.generate_content(
+            model=f"models/{model}",
+            contents=contents,
+            config=config
+        )
+
+        if not response.candidates:
+            raise Exception("Gemini returned no candidates (likely blocked by safety filters)")
+
+        # Return raw text, not JSON
+        return response.text.strip()
+
+    except Exception as e:
+        print(f"[RPG Character API] Gemini error: {e}")
+        raise
+
+
+async def generate_character_description_with_grok(user_prompt, model="grok-4-fast-reasoning", api_key=None, character_image=None, complexity="balanced", custom_system_prompt=None, temperature=0.7, top_p=0.9):
+    """
+    Generate plain text character description using Grok.
+    Supports vision like grok_native.py
+    Returns raw text, not JSON.
+    """
+    if not api_key or api_key.strip() == "":
+        api_key = os.environ.get("XAI_API_KEY")
+    if not api_key or api_key.strip() == "":
+        raise ValueError("Grok API Key is missing")
+
+    try:
+        base_url = os.environ.get("XAI_API_BASE", "https://api.x.ai").rstrip("/")
+        url = f"{base_url}/v1/chat/completions"
+
+        # Use custom system prompt if provided, otherwise generate based on complexity
+        if custom_system_prompt:
+            system_instruction = custom_system_prompt
+        else:
+            system_instruction = get_character_system_prompt(complexity)
+
+        # Build messages array (like grok_native.py)
+        messages = [
+            {"role": "system", "content": system_instruction}
+        ]
+
+        # Build user content (text + image if provided)
+        user_content = [
+            {"type": "text", "text": user_prompt}
+        ]
+
+        # Add image if provided (same format as grok_native.py line 127-132)
+        if character_image:
+            # character_image is already base64 from JavaScript
+            # Extract just the base64 part (remove "data:image/png;base64," prefix if present)
+            if character_image.startswith("data:"):
+                base64_data = character_image.split(",", 1)[1]
+            else:
+                base64_data = character_image
+
+            user_content.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/png;base64,{base64_data}",
+                    "detail": "high"
+                }
+            })
+
+        messages.append({"role": "user", "content": user_content})
+
+        payload = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+            "top_p": top_p,
+        }
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+
+        timeout = aiohttp.ClientTimeout(total=300)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, json=payload, headers=headers) as resp:
+                body = await resp.text()
+                if resp.status >= 400:
+                    raise RuntimeError(f"Grok API error {resp.status}: {body}")
+                try:
+                    data = json.loads(body)
+                except json.JSONDecodeError as e:
+                    raise RuntimeError(f"Grok API returned invalid JSON: {e}")
+
+        choices = data.get("choices") or []
+        if not choices:
+            raise RuntimeError("Grok API returned no choices")
+
+        first_choice = choices[0]
+        message = first_choice.get("message") or {}
+        content = message.get("content")
+
+        # Handle different response formats
+        if isinstance(content, list):
+            text = "".join(
+                part.get("text", "") if isinstance(part, dict) else str(part)
+                for part in content
+            ).strip()
+            if text:
+                return text
+        elif isinstance(content, str) and content.strip():
+            return content.strip()
+
+        # Fallback
+        legacy = first_choice.get("text")
+        if legacy:
+            return legacy.strip()
+
+        raise RuntimeError("Unable to extract text from Grok response")
+
+    except Exception as e:
+        print(f"[RPG Character API] Grok error: {e}")
+        raise
+
+
 def build_character_description_prompt():
     """Build system prompt for character description generation."""
     return """You are an expert at analyzing images and generating detailed character descriptions for image generation prompts.
@@ -525,6 +751,8 @@ async def _generate_character_description(request):
         gemini_api_key = data.get("gemini_api_key", "")
         grok_api_key = data.get("grok_api_key", "")
         force_regenerate = bool(data.get("force_regenerate", False))
+        complexity = data.get("complexity", "balanced")
+        custom_system_prompt = data.get("custom_system_prompt", "")
 
         # Validation
         if not character_image and not character_text:
@@ -533,9 +761,9 @@ async def _generate_character_description(request):
                 "error": "Either character_image or character_text must be provided"
             }, status=400, headers=CORS_HEADERS)
 
-        # Generate cache key
+        # Generate cache key (include complexity and custom prompt in key)
         cache_input = character_image if character_image else character_text
-        cache_key = hashlib.sha256(f"{cache_input}_{model}".encode("utf-8")).hexdigest()
+        cache_key = hashlib.sha256(f"{cache_input}_{model}_{complexity}_{custom_system_prompt}".encode("utf-8")).hexdigest()
 
         # Check cache
         if not force_regenerate and cache_key in CHARACTER_DESCRIPTION_CACHE:
@@ -547,29 +775,47 @@ async def _generate_character_description(request):
                 "cache_key": cache_key
             }, headers=CORS_HEADERS)
 
-        # Build prompts
-        system_prompt = build_character_description_prompt()
-
+        # Build user prompt
         if character_image:
-            user_prompt = "Analyze this image and generate a detailed character description following the format specified."
+            user_prompt = "Analyze this image and generate a detailed character description following the instructions."
         else:
-            user_prompt = f"Based on this character description, generate a more detailed, structured character description following the format specified:\n\n{character_text}"
+            user_prompt = f"Enhance this character description into a detailed, structured format suitable for image generation:\n\n{character_text}"
 
-        # Generate description
+        # Generate description using dedicated function
+        print(f"[RPG Character API] Generating character description with {model} (complexity: {complexity})...")
+
         if model.startswith("gemini"):
-            # For Gemini with image support
-            result = await generate_with_gemini(system_prompt, user_prompt, model, gemini_api_key, temperature, top_p)
-            description = result[0].get("positive", "") if isinstance(result, list) else str(result)
+            description = await generate_character_description_with_gemini(
+                user_prompt,
+                model=model,
+                api_key=gemini_api_key,
+                character_image=character_image,
+                complexity=complexity,
+                custom_system_prompt=custom_system_prompt if custom_system_prompt else None,
+                temperature=temperature,
+                top_p=top_p
+            )
         elif model.startswith("grok"):
-            result = await generate_with_grok(system_prompt, user_prompt, model, grok_api_key, temperature, top_p)
-            description = result[0].get("positive", "") if isinstance(result, list) else str(result)
+            description = await generate_character_description_with_grok(
+                user_prompt,
+                model=model,
+                api_key=grok_api_key,
+                character_image=character_image,
+                complexity=complexity,
+                custom_system_prompt=custom_system_prompt if custom_system_prompt else None,
+                temperature=temperature,
+                top_p=top_p
+            )
         else:
             raise ValueError(f"Unsupported model: {model}")
+
+        if not description or description.strip() == "":
+            raise ValueError("Generated description is empty. API may have failed.")
 
         # Cache the description
         CHARACTER_DESCRIPTION_CACHE[cache_key] = description
 
-        print(f"[RPG Character API] Generated character description with {model}")
+        print(f"[RPG Character API] ✅ Generated character description ({len(description)} chars)")
         return web.json_response({
             "success": True,
             "description": description,

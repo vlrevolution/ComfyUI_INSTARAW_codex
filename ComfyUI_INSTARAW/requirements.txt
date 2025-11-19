@@ -10,7 +10,7 @@ kornia
 scipy
 tqdm
 
-google-genai~=1.43.0
+google-genai>=1.51.0
 google-api-core
 
 # Performance enhancement for model downloads from Hugging Face

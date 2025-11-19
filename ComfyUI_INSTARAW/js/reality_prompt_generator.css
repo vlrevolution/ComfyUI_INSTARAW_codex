@@ -113,7 +113,6 @@
 	cursor: pointer;
 	font-size: 13px;
 	font-weight: 500;
-	transition: all 0.2s ease;
 	display: flex;
 	align-items: center;
 	gap: 6px;
@@ -212,7 +211,6 @@
 	cursor: pointer;
 	font-weight: 600;
 	font-size: 13px;
-	transition: background 0.2s ease;
 }
 
 .instaraw-rpg-btn-primary:hover {
@@ -220,8 +218,9 @@
 }
 
 .instaraw-rpg-btn-primary:disabled {
-	opacity: 0.5;
+	background: #4f46e5;
 	cursor: not-allowed;
+	color: rgba(255, 255, 255, 0.7);
 }
 
 .instaraw-rpg-btn-secondary {
@@ -233,7 +232,6 @@
 	cursor: pointer;
 	font-weight: 500;
 	font-size: 12px;
-	transition: all 0.2s ease;
 }
 
 .instaraw-rpg-btn-secondary:hover {
@@ -242,8 +240,9 @@
 }
 
 .instaraw-rpg-btn-secondary:disabled {
-	opacity: 0.5;
+	background: rgba(255, 255, 255, 0.05);
 	cursor: not-allowed;
+	color: rgba(249, 250, 251, 0.5);
 }
 
 .instaraw-rpg-btn-warning {
@@ -318,6 +317,25 @@
 	font-size: 12px;
 	color: rgba(249, 250, 251, 0.7);
 	margin-top: 8px;
+}
+
+/* === Button Loading Progress Bar === */
+.instaraw-rpg-progress-bar-loading {
+	position: absolute;
+	bottom: 2px;
+	left: 0;
+	right: 0;
+	height: 2px;
+	background: linear-gradient(90deg, #c4b5fd, #818cf8, #c4b5fd);
+	background-size: 200% 100%;
+	animation: instaraw-rpg-progress-slide 1.5s linear infinite;
+	opacity: 1;
+	box-shadow: 0 0 8px rgba(167, 139, 250, 0.6);
+}
+
+@keyframes instaraw-rpg-progress-slide {
+	0% { background-position: 200% 0; }
+	100% { background-position: -200% 0; }
 }
 
 /* === Empty State (AIL Pattern) === */
@@ -446,7 +464,6 @@
 	color: #c4b5fd;
 	white-space: nowrap;
 	user-select: none;
-	transition: all 0.2s ease;
 }
 
 .instaraw-rpg-sdxl-toggle:hover {
@@ -507,7 +524,6 @@
 	color: rgba(249, 250, 251, 0.5);
 	font-size: 16px;
 	cursor: pointer;
-	transition: color 0.2s ease;
 }
 
 .instaraw-rpg-bookmark-btn:hover {
@@ -579,7 +595,7 @@
 	background: rgba(167, 139, 250, 0.2);
 	color: #c4b5fd;
 	padding: 2px 8px;
-	border-radius: 3px;
+	border-radius: 4px;
 	font-size: 10px;
 	font-weight: 500;
 }
@@ -588,7 +604,7 @@
 	background: rgba(129, 140, 248, 0.2);
 	color: #818cf8;
 	padding: 2px 8px;
-	border-radius: 3px;
+	border-radius: 4px;
 	font-size: 10px;
 	font-weight: 500;
 }
@@ -599,7 +615,7 @@
 	color: #fbbf24;
 	font-weight: 600;
 	padding: 1px 2px;
-	border-radius: 2px;
+	border-radius: 4px;
 }
 
 /* === Match Badge === */
@@ -642,11 +658,10 @@
 	color: #818cf8;
 	border: 1px solid rgba(99, 102, 241, 0.3);
 	padding: 2px 8px;
-	border-radius: 3px;
+	border-radius: 4px;
 	font-size: 10px;
 	font-weight: 600;
 	cursor: pointer;
-	transition: all 0.2s ease;
 }
 
 .instaraw-rpg-expand-tags-btn:hover {
@@ -666,11 +681,10 @@
 	color: #818cf8;
 	border: 1px solid rgba(129, 140, 248, 0.3);
 	padding: 2px 8px;
-	border-radius: 3px;
+	border-radius: 4px;
 	font-size: 10px;
 	font-weight: 600;
 	cursor: pointer;
-	transition: all 0.2s ease;
 }
 
 .instaraw-rpg-toggle-tags-btn:hover {
@@ -1021,7 +1035,7 @@
 	position: relative;
 	width: 100%;
 	height: 180px;
-	border-radius: 6px;
+	border-radius: 4px;
 	overflow: hidden;
 	background: #000000;
 	border: 2px solid rgba(255, 255, 255, 0.1);
@@ -1166,7 +1180,7 @@
 	font-size: 9px;
 	font-weight: 600;
 	padding: 2px 6px;
-	border-radius: 3px;
+	border-radius: 4px;
 	pointer-events: none;
 	text-transform: uppercase;
 	letter-spacing: 0.3px;
@@ -1358,7 +1372,7 @@
 	position: relative; /* For index badge positioning */
 	width: 100%;
 	height: 100px; /* Increased for better aspect ratio label visibility */
-	border-radius: 6px;
+	border-radius: 4px;
 	overflow: hidden;
 	background: #000000;
 	border: 2px solid rgba(255, 255, 255, 0.1);
@@ -1459,7 +1473,7 @@
 .instaraw-rpg-section {
 	background: rgba(255, 255, 255, 0.02);
 	border: 1px solid rgba(255, 255, 255, 0.08);
-	border-radius: 8px;
+	border-radius: 4px;
 	padding: 14px;
 }
 
@@ -1486,7 +1500,7 @@
 	padding: 6px 14px;
 	font-size: 12px;
 	font-weight: 700;
-	border-radius: 6px;
+	border-radius: 4px;
 	text-transform: uppercase;
 	letter-spacing: 0.5px;
 }
@@ -1535,7 +1549,7 @@
 	padding: 10px;
 	background: rgba(139, 92, 246, 0.1);
 	border: 1px solid rgba(139, 92, 246, 0.3);
-	border-radius: 6px;
+	border-radius: 4px;
 }
 
 .instaraw-rpg-character-desc-text {
@@ -1560,8 +1574,7 @@
 	padding: 8px;
 	background: rgba(255, 255, 255, 0.03);
 	border: 1px solid rgba(255, 255, 255, 0.08);
-	border-radius: 6px;
-	transition: all 0.2s ease;
+	border-radius: 4px;
 }
 
 .instaraw-rpg-checkbox-label:hover {
@@ -1626,9 +1639,8 @@
 	color: #a78bfa;
 	padding: 6px 12px;
 	font-size: 12px;
-	border-radius: 6px;
+	border-radius: 4px;
 	cursor: pointer;
-	transition: all 0.2s ease;
 }
 
 .instaraw-rpg-btn-text:hover {
@@ -1647,7 +1659,7 @@
 	padding: 14px;
 	background: rgba(139, 92, 246, 0.1);
 	border: 1px solid rgba(139, 92, 246, 0.3);
-	border-radius: 8px;
+	border-radius: 4px;
 }
 
 .instaraw-rpg-generate-preview h4 {
@@ -1694,7 +1706,7 @@
 	width: 100%;
 	height: 120px; /* Increased for better aspect ratio visibility */
 	background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a78bfa 100%);
-	border-radius: 6px;
+	border-radius: 4px;
 	display: flex;
 	align-items: center;
 	justify-content: center;
