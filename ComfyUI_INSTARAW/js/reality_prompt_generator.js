@@ -469,13 +469,10 @@ app.registerExtension({
 						<div class="instaraw-rpg-topbar">
 							<div class="instaraw-rpg-mode-card">
 								<div class="instaraw-rpg-mode-indicator-container">
-									<span class="instaraw-rpg-mode-badge ${detectedMode === 'img2img' ? 'instaraw-rpg-mode-img2img' : 'instaraw-rpg-mode-txt2img'}">
+									<span class="instaraw-rpg-mode-badge ${detectedMode === 'img2img' ? 'instaraw-rpg-mode-img2img' : 'instaraw-rpg-mode-txt2img'}" style="font-size: 14px; padding: 8px 16px; font-weight: 700;">
 										${detectedMode === 'img2img' ? '🖼️ IMG2IMG MODE' : '🎨 TXT2IMG MODE'}
 									</span>
 									${isDetectedFromAIL ? `<span class="instaraw-rpg-mode-source">From AIL #${node._linkedAILNodeId}</span>` : ''}
-								</div>
-								<div class="instaraw-rpg-mode-meta">
-									<span class="instaraw-rpg-mode-pill">${generationModeLabel}</span>
 								</div>
 							</div>
 							<div class="instaraw-rpg-kpi-row">

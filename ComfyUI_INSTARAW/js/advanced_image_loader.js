@@ -986,18 +986,24 @@ app.registerExtension({
 
 					const batchData = JSON.parse(node.properties.batch_data || "{}");
 					const items = mode === "img2img" ? batchData.images : batchData.latents;
+					const order = batchData.order || [];
 
 					if (!items || items.length === 0) {
 						alert("No images/latents in AIL to sync!");
 						return;
 					}
 
-					// Update repeat counts to match prompts
+					// Update repeat counts to match prompts, respecting display order
 					let totalCount = 0;
 					repeats.forEach((repeatCount, idx) => {
-						if (items[idx]) {
-							items[idx].repeat_count = repeatCount;
-							totalCount += repeatCount;
+						// Find item by order, not by raw array index
+						const itemId = order[idx];
+						if (itemId) {
+							const item = items.find(i => i.id === itemId);
+							if (item) {
+								item.repeat_count = repeatCount;
+								totalCount += repeatCount;
+							}
 						}
 					});
 
