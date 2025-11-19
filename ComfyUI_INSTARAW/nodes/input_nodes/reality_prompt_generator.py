@@ -99,6 +99,31 @@ class INSTARAW_RealityPromptGenerator:
                         ),
                     },
                 ),
+                "output_width": (
+                    "INT",
+                    {
+                        "default": 1024,
+                        "min": 64,
+                        "max": 8192,
+                        "tooltip": "Target output width. Connect from INSTARAW Aspect Ratio Selector.",
+                    },
+                ),
+                "output_height": (
+                    "INT",
+                    {
+                        "default": 1024,
+                        "min": 64,
+                        "max": 8192,
+                        "tooltip": "Target output height. Connect from INSTARAW Aspect Ratio Selector.",
+                    },
+                ),
+                "aspect_label": (
+                    "STRING",
+                    {
+                        "default": "1:1",
+                        "tooltip": "Aspect ratio label (e.g., '16:9'). Connect from INSTARAW Aspect Ratio Selector.",
+                    },
+                ),
             },
             "hidden": {
                 "node_id": "UNIQUE_ID",

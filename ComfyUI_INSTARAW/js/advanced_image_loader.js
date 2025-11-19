@@ -338,7 +338,17 @@ app.registerExtension({
 								const img = images.find(i => i.id === imgId);
 								if (!img) return null;
 								const thumbUrl = `/view?filename=${img.thumbnail}&type=input&subfolder=INSTARAW_BatchUploads/${node.id}`;
-								return {url: thumbUrl, index: order.indexOf(imgId), id: imgId};
+								const width = img.width || 1024;
+								const height = img.height || 1024;
+								return {
+									url: thumbUrl,
+									index: order.indexOf(imgId),
+									id: imgId,
+									repeat_count: img.repeat_count || 1,
+									width: width,
+									height: height,
+									aspect_label: getAspectLabel(width, height)
+								};
 							}).filter(i => i !== null),
 							total: batchData.total_count || 0
 						}
@@ -346,6 +356,11 @@ app.registerExtension({
 				};
 
 				const renderTxt2ImgGallery = () => {
+					// Preserve batch count input value
+					const existingInput = container.querySelector(".instaraw-adv-loader-batch-count-input");
+					const preservedBatchCount = existingInput?.value || node._batchAddCount || 5;
+					node._batchAddCount = preservedBatchCount;
+
 					const batchData = JSON.parse(node.properties.batch_data || "{}");
 					const latents = batchData.latents || [];
 					const order = batchData.order || [];
@@ -375,7 +390,7 @@ app.registerExtension({
                             <div class="instaraw-adv-loader-actions">
                                 <button class="instaraw-adv-loader-add-latent-btn" title="Add empty latent">🖼️ Add Empty Latent</button>
                                 <div class="instaraw-adv-loader-batch-add-controls">
-                                    <input type="number" class="instaraw-adv-loader-batch-count-input" value="5" min="1" max="100" />
+                                    <input type="number" class="instaraw-adv-loader-batch-count-input" value="${preservedBatchCount}" min="1" max="100" />
                                     <button class="instaraw-adv-loader-batch-add-btn" title="Batch add empty latents">📦 Add N</button>
                                 </div>
                                 ${latents.length > 0 ? `<button class="instaraw-adv-loader-delete-all-btn" title="Delete all latents">🗑️ Delete All</button>` : ""}
@@ -452,6 +467,7 @@ app.registerExtension({
 									width: latent.width,
 									height: latent.height,
 									aspect_label: latent.aspect_label,
+									repeat_count: latent.repeat_count || 1,
 									index: order.indexOf(latentId)
 								};
 							}).filter(l => l !== null),
@@ -577,6 +593,8 @@ app.registerExtension({
 						syncBatchDataWidget();
 						const statsEl = container.querySelector(".instaraw-adv-loader-total");
 						if (statsEl) statsEl.textContent = `Total: ${batchData.total_count} (with repeats)`;
+						// Re-render to trigger update event for RPG
+						renderGallery();
 					}
 				};
 
@@ -858,6 +876,82 @@ app.registerExtension({
 					}
 				};
 				api.addEventListener("instaraw_adv_loader_update", handleBatchUpdate);
+
+				// Listen for Sync requests from RPG
+				window.addEventListener("INSTARAW_SYNC_AIL_LATENTS", (event) => {
+					const { targetNodeId, latentSpecs, dimensions } = event.detail;
+					if (node.id !== targetNodeId) return; // Not for this node
+
+					console.log(`[INSTARAW AIL ${node.id}] Received sync request: Create ${latentSpecs.length} empty latents with repeat counts`);
+
+					// Get current dimensions or use provided
+					const currentDimensions = getTxt2ImgDimensions();
+					const width = dimensions?.width || currentDimensions.width;
+					const height = dimensions?.height || currentDimensions.height;
+					const aspect_label = dimensions?.aspect_label || currentDimensions.aspect_label;
+
+					// Clear existing latents and create new ones
+					const batchData = JSON.parse(node.properties.batch_data || "{}");
+					batchData.latents = [];
+					batchData.order = [];
+
+					// Create latents with repeat counts matching prompts
+					let totalCount = 0;
+					for (let i = 0; i < latentSpecs.length; i++) {
+						const spec = latentSpecs[i];
+						const newLatent = {
+							id: generateUUID(),
+							width: width,
+							height: height,
+							repeat_count: spec.repeat_count || 1,
+							aspect_label: aspect_label
+						};
+						batchData.latents.push(newLatent);
+						batchData.order.push(newLatent.id);
+						totalCount += newLatent.repeat_count;
+					}
+
+					batchData.total_count = totalCount;
+					node.properties.batch_data = JSON.stringify(batchData);
+
+					syncBatchDataWidget();
+					renderGallery();
+
+					console.log(`[INSTARAW AIL ${node.id}] Created ${latentSpecs.length} latents (${totalCount} total generations) (${width}×${height})`);
+				});
+
+				// Listen for Repeat Sync requests from RPG
+				window.addEventListener("INSTARAW_SYNC_AIL_REPEATS", (event) => {
+					const { targetNodeId, mode, repeats } = event.detail;
+					if (node.id !== targetNodeId) return; // Not for this node
+
+					console.log(`[INSTARAW AIL ${node.id}] Received repeat sync request: Update ${repeats.length} items`);
+
+					const batchData = JSON.parse(node.properties.batch_data || "{}");
+					const items = mode === "img2img" ? batchData.images : batchData.latents;
+
+					if (!items || items.length === 0) {
+						alert("No images/latents in AIL to sync!");
+						return;
+					}
+
+					// Update repeat counts to match prompts
+					let totalCount = 0;
+					repeats.forEach((repeatCount, idx) => {
+						if (items[idx]) {
+							items[idx].repeat_count = repeatCount;
+							totalCount += repeatCount;
+						}
+					});
+
+					batchData.total_count = totalCount;
+					node.properties.batch_data = JSON.stringify(batchData);
+
+					syncBatchDataWidget();
+					renderGallery();
+
+					console.log(`[INSTARAW AIL ${node.id}] Synced repeat counts: ${repeats.length} items, ${totalCount} total`);
+				});
 
 				setTimeout(() => {
 					const batchIndexWidget = node.widgets?.find((w) => w.name === "batch_index");

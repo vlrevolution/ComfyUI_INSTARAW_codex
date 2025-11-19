@@ -72,7 +72,9 @@ app.registerExtension({
 				// AIL sync state
 				node._linkedAILNodeId = null;
 				node._linkedImages = [];
+				node._linkedLatents = [];
 				node._linkedImageCount = 0;
+				node._linkedAILMode = null;
 
 				// Pagination state
 				let currentPage = 0;
@@ -120,6 +122,19 @@ app.registerExtension({
 						const widget = node.addWidget("text", "prompt_queue_data", node.properties.prompt_queue_data, () => {}, { serialize: true });
 						widget.hidden = true;
 					}
+				};
+
+				// Get target output dimensions from aspect ratio selector
+				const getTargetDimensions = () => {
+					const widthWidget = node.widgets?.find(w => w.name === "output_width");
+					const heightWidget = node.widgets?.find(w => w.name === "output_height");
+					const aspectWidget = node.widgets?.find(w => w.name === "aspect_label");
+
+					return {
+						width: widthWidget?.value || 1024,
+						height: heightWidget?.value || 1024,
+						aspect_label: aspectWidget?.value || "1:1"
+					};
 				};
 
 				const parsePromptBatch = () => {
@@ -313,12 +328,10 @@ app.registerExtension({
 
 					const generationModeLabel = generationMode === "one_per_entry" ? "1 image per entry" : "Respect repeat counts";
 					const linkedImages = node._linkedImageCount || 0;
-					const modeHint =
-						currentMode === "img2img"
-							? "Generate from prompt batch & linked images"
-							: currentMode === "txt2img"
-								? "Generate fresh images from prompt batch"
-								: "Let RPG decide per workflow wiring";
+
+					// Use detected mode from AIL if available
+					const detectedMode = node._linkedAILMode || resolvedMode;
+					const isDetectedFromAIL = node._linkedAILMode !== null;
 
 					const tabButtons = tabs
 						.map(
@@ -344,17 +357,13 @@ app.registerExtension({
 					container.innerHTML = `
 						<div class="instaraw-rpg-topbar">
 							<div class="instaraw-rpg-mode-card">
-								<div class="instaraw-rpg-mode-selector">
-									<label>Mode</label>
-									<select class="instaraw-rpg-mode-dropdown">
-										<option value="auto" ${currentMode === "auto" ? "selected" : ""}>🎯 Auto</option>
-										<option value="img2img" ${currentMode === "img2img" ? "selected" : ""}>🖼️ Img2Img</option>
-										<option value="txt2img" ${currentMode === "txt2img" ? "selected" : ""}>📝 Txt2Img</option>
-									</select>
+								<div class="instaraw-rpg-mode-indicator-container">
+									<span class="instaraw-rpg-mode-badge ${detectedMode === 'img2img' ? 'instaraw-rpg-mode-img2img' : 'instaraw-rpg-mode-txt2img'}">
+										${detectedMode === 'img2img' ? '🖼️ IMG2IMG MODE' : '🎨 TXT2IMG MODE'}
+									</span>
+									${isDetectedFromAIL ? `<span class="instaraw-rpg-mode-source">From AIL #${node._linkedAILNodeId}</span>` : ''}
 								</div>
 								<div class="instaraw-rpg-mode-meta">
-									<span class="instaraw-rpg-mode-hint">${modeHint}</span>
-									<span class="instaraw-rpg-mode-pill">Resolved: ${resolvedMode}</span>
 									<span class="instaraw-rpg-mode-pill">${generationModeLabel}</span>
 								</div>
 							</div>
@@ -908,6 +917,12 @@ app.registerExtension({
 					const filters = JSON.parse(node.properties.library_filters || "{}");
 					const sdxlMode = filters.sdxl_mode || false;
 
+					// Get linked images/latents for thumbnails
+					const detectedMode = node._linkedAILMode || "img2img";
+					const linkedImages = node._linkedImages || [];
+					const linkedLatents = node._linkedLatents || [];
+					const hasAILLink = node._linkedAILNodeId !== null;
+
 					const gridContent =
 						promptQueue.length === 0
 							? `<div class="instaraw-rpg-empty"><p>No prompts in batch</p><p class="instaraw-rpg-hint">Add prompts from Library or Creative mode</p></div>`
@@ -916,12 +931,85 @@ app.registerExtension({
 										(entry, idx) => {
 											const sourceType = entry.source_id ? 'from-library' : 'from-ai';
 											const sourceBadgeText = entry.source_id ? '📚 Library' : '✨ AI Generated';
+
+											// Get linked thumbnail for this index
+											const linkedItem = detectedMode === "img2img" ? linkedImages[idx] : linkedLatents[idx];
+											const hasThumbnail = linkedItem !== undefined;
+
+											let thumbnailHtml = '';
+											if (hasThumbnail) {
+												if (detectedMode === "img2img") {
+													// Show image thumbnail with target output dimensions
+													const targetDims = getTargetDimensions();
+													const targetAspectRatio = targetDims.width / targetDims.height;
+													thumbnailHtml = `
+														<label class="instaraw-rpg-thumbnail-label">IMG2IMG Input Image → Output: ${targetDims.aspect_label} (${targetDims.width}×${targetDims.height})</label>
+														<div class="instaraw-rpg-batch-thumbnail">
+															<span class="instaraw-rpg-batch-thumbnail-index">#${idx + 1}</span>
+															<div class="instaraw-rpg-batch-aspect-preview" style="aspect-ratio: ${targetAspectRatio};">
+																<img src="${linkedItem.url}" alt="Linked image ${idx + 1}" style="width: 100%; height: 100%; object-fit: cover;" />
+																<div class="instaraw-rpg-crop-indicator">Center Crop</div>
+															</div>
+														</div>
+													`;
+												} else {
+													// Show latent preview with aspect ratio box (like AIL)
+													const aspectRatio = linkedItem.width / linkedItem.height;
+													thumbnailHtml = `
+														<label class="instaraw-rpg-thumbnail-label">TXT2IMG Empty Latent</label>
+														<div class="instaraw-rpg-batch-thumbnail instaraw-rpg-batch-thumbnail-latent">
+															<span class="instaraw-rpg-batch-thumbnail-index">#${idx + 1}</span>
+															<div class="instaraw-rpg-batch-aspect-preview" style="aspect-ratio: ${aspectRatio};">
+																<div class="instaraw-rpg-batch-aspect-content">
+																	<div style="font-size: 24px;">📐</div>
+																	<div style="font-size: 14px; font-weight: 600;">${linkedItem.aspect_label || '1:1'}</div>
+																</div>
+															</div>
+														</div>
+													`;
+												}
+											} else {
+												// Show placeholder
+												const promptQueueTemp = parsePromptBatch();
+												const totalMissing = promptQueueTemp.length - (detectedMode === "img2img" ? linkedImages.length : linkedLatents.length);
+												thumbnailHtml = `
+													<div class="instaraw-rpg-batch-thumbnail instaraw-rpg-batch-thumbnail-missing">
+														<span class="instaraw-rpg-batch-thumbnail-index">#${idx + 1}</span>
+														<div class="instaraw-rpg-batch-thumbnail-placeholder">
+															<div style="font-size: 24px; opacity: 0.3;">⚠️</div>
+															<div style="font-size: 11px; color: #f59e0b; font-weight: 600; margin-top: 4px;">
+																${hasAILLink ? 'Missing Link' : 'No AIL'}
+															</div>
+															${hasAILLink && detectedMode === "txt2img" ? `
+																<div style="font-size: 9px; color: #9ca3af; margin-top: 4px;">
+																	Click "Sync AIL"
+																</div>
+															` : hasAILLink && detectedMode === "img2img" && totalMissing > 0 ? `
+																<div style="font-size: 9px; color: #9ca3af; margin-top: 4px;">
+																	Upload ${totalMissing} more image${totalMissing !== 1 ? 's' : ''} to AIL
+																</div>
+															` : ''}
+														</div>
+													</div>
+												`;
+											}
+
+											// Get repeat count comparison
+											const promptRepeat = entry.repeat_count || 1;
+											const ailRepeat = linkedItem ? (linkedItem.repeat_count || 1) : null;
+											const repeatMismatch = ailRepeat !== null && promptRepeat !== ailRepeat;
+
 											return `
 							<div class="instaraw-rpg-batch-item" data-id="${entry.id}" data-idx="${idx}" draggable="${reorderModeEnabled}">
 								<div class="instaraw-rpg-batch-item-header">
 									<div style="display: flex; align-items: center; gap: 8px;">
 										<span class="instaraw-rpg-batch-item-number">#${idx + 1}</span>
 										<span class="instaraw-rpg-source-badge ${sourceType}">${sourceBadgeText}</span>
+										${ailRepeat !== null ? `
+											<span class="instaraw-rpg-repeat-status ${repeatMismatch ? 'instaraw-rpg-repeat-mismatch' : 'instaraw-rpg-repeat-match'}" title="${repeatMismatch ? 'Repeat counts do not match! Click Sync Repeats to fix.' : 'Repeat counts match'}">
+												${repeatMismatch ? '⚠️ ' : '✓ '}Prompt: ×${promptRepeat} | AIL: ×${ailRepeat}
+											</span>
+										` : ''}
 									</div>
 									<div class="instaraw-rpg-batch-item-controls">
 										<label>Repeat:</label>
@@ -929,6 +1017,10 @@ app.registerExtension({
 										<button class="instaraw-rpg-batch-delete-btn" data-id="${entry.id}" title="Remove prompt">×</button>
 									</div>
 								</div>
+
+								<!-- Thumbnail Section -->
+								${thumbnailHtml}
+
 								<div class="instaraw-rpg-batch-item-content">
 									${sdxlMode && entry.tags && entry.tags.length > 0 ? `
 										<!-- SDXL Mode: Editable SDXL prompt (tags) -->
@@ -968,6 +1060,15 @@ app.registerExtension({
 					const libraryCount = promptQueue.filter(p => p.source_id).length;
 					const aiCount = promptQueue.filter(p => !p.source_id).length;
 
+					// Show sync button if: AIL linked + txt2img mode + has prompts
+					const showSyncButton = hasAILLink && detectedMode === "txt2img" && promptQueue.length > 0;
+
+					// Check for repeat count mismatches
+					const hasRepeatMismatch = promptQueue.some((p, idx) => {
+						const linkedItem = detectedMode === "img2img" ? linkedImages[idx] : linkedLatents[idx];
+						return linkedItem && (p.repeat_count || 1) !== (linkedItem.repeat_count || 1);
+					});
+
 					return `
 						<div class="instaraw-rpg-batch-header">
 							<div>
@@ -977,6 +1078,16 @@ app.registerExtension({
 								</p>
 							</div>
 							<div class="instaraw-rpg-batch-actions">
+								${showSyncButton ? `
+									<button class="instaraw-rpg-btn-primary instaraw-rpg-sync-ail-btn" title="Create ${totalGenerations} empty latents in AIL #${node._linkedAILNodeId}">
+										📤 Sync AIL (${totalGenerations})
+									</button>
+								` : ''}
+								${hasAILLink && promptQueue.length > 0 ? `
+									<button class="instaraw-rpg-btn-secondary instaraw-rpg-sync-repeats-btn ${hasRepeatMismatch ? 'instaraw-rpg-btn-warning' : ''}" title="Sync repeat counts from prompts to AIL">
+										${hasRepeatMismatch ? '⚠️ ' : '🔄 '}Sync Repeats
+									</button>
+								` : ''}
 								<button class="instaraw-rpg-btn-secondary instaraw-rpg-reorder-toggle-btn">
 									${reorderModeEnabled ? '🔓 Reorder ON' : '🔒 Reorder OFF'}
 								</button>
@@ -996,39 +1107,71 @@ app.registerExtension({
 						return `
 							<div class="instaraw-rpg-image-preview-section">
 								<div class="instaraw-rpg-image-preview-empty">
-									<p>No image source linked</p>
+									<p>No source linked</p>
 									<p class="instaraw-rpg-hint">Connect an Advanced Image Loader to see preview</p>
 								</div>
 							</div>
 						`;
 					}
 
-					const imageCount = node._linkedImageCount || 0;
+					const itemCount = node._linkedImageCount || 0;
+					const detectedMode = node._linkedAILMode || "img2img";
 					const images = node._linkedImages || [];
-					const displayImages = images.slice(0, 10);
-					const isMatch = totalGenerations === imageCount;
+					const latents = node._linkedLatents || [];
+					const isImg2Img = detectedMode === "img2img";
+					const items = isImg2Img ? images : latents;
+					const displayItems = items.slice(0, 10);
+					const itemLabel = isImg2Img ? "images" : "latents";
+
+					const isMatch = totalGenerations === itemCount;
 					const matchClass = isMatch ? "match" : "mismatch";
 					const matchIcon = isMatch ? "✅" : "⚠️";
 
 					return `
 						<div class="instaraw-rpg-image-preview-section">
 							<div class="instaraw-rpg-image-preview-header">
-								<span>🖼️ Linked to Advanced Image Loader (Node #${node._linkedAILNodeId})</span>
+								<span>${isImg2Img ? '🖼️ IMG2IMG Input Images' : '📐 TXT2IMG Empty Latents'} (AIL Node #${node._linkedAILNodeId})</span>
 								<span class="instaraw-rpg-validation-badge instaraw-rpg-validation-${matchClass}">
-									${matchIcon} ${totalGenerations} prompts ↔ ${imageCount} images
+									${matchIcon} ${totalGenerations} prompts ↔ ${itemCount} ${itemLabel}
 								</span>
 							</div>
 							<div class="instaraw-rpg-image-preview-grid">
-								${displayImages
-									.map(
-										(img) => `
-									<div class="instaraw-rpg-preview-thumb">
-										<img src="${img.url}" alt="Preview" />
-									</div>
-								`
-									)
+								${displayItems
+									.map((item, idx) => {
+										if (isImg2Img) {
+											// Display image thumbnail with target output aspect ratio and center crop
+											const targetDims = getTargetDimensions();
+											const targetAspectRatio = targetDims.width / targetDims.height;
+											return `
+												<div class="instaraw-rpg-preview-thumb">
+													<span class="instaraw-rpg-preview-index">#${idx + 1}</span>
+													<div class="instaraw-rpg-preview-aspect-box" style="aspect-ratio: ${targetAspectRatio}; position: relative;">
+														<img src="${item.url}" alt="Preview ${idx + 1}" style="width: 100%; height: 100%; object-fit: cover;" />
+														<div class="instaraw-rpg-crop-indicator">Center Crop</div>
+													</div>
+													<span class="instaraw-rpg-preview-aspect-label">→ ${targetDims.aspect_label} (${targetDims.width}×${targetDims.height})</span>
+													${item.repeat_count && item.repeat_count > 1 ? `<span class="instaraw-rpg-preview-repeat">×${item.repeat_count}</span>` : ''}
+												</div>
+											`;
+										} else {
+											// Display latent placeholder with aspect preview box
+											const aspectRatio = item.width / item.height;
+											return `
+												<div class="instaraw-rpg-preview-latent">
+													<span class="instaraw-rpg-preview-index">#${idx + 1}</span>
+													<div class="instaraw-rpg-preview-aspect-box" style="aspect-ratio: ${aspectRatio};">
+														<div class="instaraw-rpg-preview-aspect-content">
+															<div style="font-size: 20px;">📐</div>
+															<div style="font-size: 11px; font-weight: 600;">${item.aspect_label || '1:1'}</div>
+														</div>
+													</div>
+													${item.repeat_count && item.repeat_count > 1 ? `<span class="instaraw-rpg-preview-repeat">×${item.repeat_count}</span>` : ''}
+												</div>
+											`;
+										}
+									})
 									.join("")}
-								${images.length > 10 ? `<div class="instaraw-rpg-preview-more">+${images.length - 10} more</div>` : ""}
+								${items.length > 10 ? `<div class="instaraw-rpg-preview-more">+${items.length - 10} more</div>` : ""}
 							</div>
 						</div>
 					`;
@@ -2015,6 +2158,67 @@ app.registerExtension({
 						};
 					}
 
+					// Sync Repeats button
+					const syncRepeatsBtn = container.querySelector(".instaraw-rpg-sync-repeats-btn");
+					if (syncRepeatsBtn) {
+						syncRepeatsBtn.onclick = () => {
+							const promptQueue = parsePromptBatch();
+							const detectedMode = node._linkedAILMode || "img2img";
+
+							if (confirm(`This will update repeat counts in AIL Node #${node._linkedAILNodeId} to match your ${promptQueue.length} prompts.\n\nContinue?`)) {
+								// Send sync event to AIL
+								window.dispatchEvent(new CustomEvent("INSTARAW_SYNC_AIL_REPEATS", {
+									detail: {
+										targetNodeId: node._linkedAILNodeId,
+										mode: detectedMode,
+										repeats: promptQueue.map(p => p.repeat_count || 1)
+									}
+								}));
+
+								console.log(`[INSTARAW RPG] Sent repeat sync request to AIL #${node._linkedAILNodeId}`);
+							}
+						};
+					}
+
+					// Sync AIL button
+					const syncAilBtn = container.querySelector(".instaraw-rpg-sync-ail-btn");
+					if (syncAilBtn) {
+						syncAilBtn.onclick = () => {
+							if (!node._linkedAILNodeId) {
+								alert("No Advanced Image Loader detected. Connect AIL to RPG first.");
+								return;
+							}
+
+							const promptQueue = parsePromptBatch();
+							const totalGenerations = promptQueue.reduce((sum, p) => sum + (p.repeat_count || 1), 0);
+
+							// Build latent specs with repeat counts
+							const latentSpecs = promptQueue.map(p => ({
+								repeat_count: p.repeat_count || 1
+							}));
+
+							if (confirm(`This will create ${promptQueue.length} latent${promptQueue.length !== 1 ? 's' : ''} (${totalGenerations} total generations) in AIL Node #${node._linkedAILNodeId} to match your prompts.\n\nContinue?`)) {
+								// Get current dimensions from AIL (or use defaults)
+								const dimensions = {
+									width: 1024,
+									height: 1024,
+									aspect_label: "1:1"
+								};
+
+								// Dispatch event to AIL with latent specs
+								window.dispatchEvent(new CustomEvent("INSTARAW_SYNC_AIL_LATENTS", {
+									detail: {
+										targetNodeId: node._linkedAILNodeId,
+										latentSpecs: latentSpecs,
+										dimensions: dimensions
+									}
+								}));
+
+								console.log(`[INSTARAW RPG] Sent sync request to AIL #${node._linkedAILNodeId} for ${promptQueue.length} latents (${totalGenerations} generations)`);
+							}
+						};
+					}
+
 					// Creative mode buttons
 					const generateCreativeBtn = container.querySelector(".instaraw-rpg-generate-creative-btn");
 					if (generateCreativeBtn) {
@@ -2108,13 +2312,22 @@ app.registerExtension({
 
 				// === AIL Update Listener ===
 				window.addEventListener("INSTARAW_AIL_UPDATED", (event) => {
-					const { nodeId, images, total, mode, enable_img2img } = event.detail;
+					const { nodeId, images, latents, total, mode, enable_img2img } = event.detail;
 					node._linkedAILNodeId = nodeId;
-					node._linkedImages = images;
-					node._linkedImageCount = total;
-					node._linkedAILMode = mode || (enable_img2img ? "img2img" : "txt2img");  // NEW: Store detected mode
+					node._linkedAILMode = mode || (enable_img2img ? "img2img" : "txt2img");
 
-					console.log(`[INSTARAW RPG] AIL update - Node: ${nodeId}, Mode: ${node._linkedAILMode}, Images: ${total}`);
+					// Store images OR latents depending on mode
+					if (mode === "img2img" || enable_img2img) {
+						node._linkedImages = images || [];
+						node._linkedLatents = [];
+					} else {
+						node._linkedImages = [];
+						node._linkedLatents = latents || [];
+					}
+
+					node._linkedImageCount = total;
+
+					console.log(`[INSTARAW RPG] AIL update - Node: ${nodeId}, Mode: ${node._linkedAILMode}, Count: ${total}`);
 
 					// Update expected_image_count widget
 					const widget = node.widgets?.find((w) => w.name === "expected_image_count");

@@ -246,6 +246,17 @@
 	cursor: not-allowed;
 }
 
+.instaraw-rpg-btn-warning {
+	background: rgba(245, 158, 11, 0.15);
+	border-color: rgba(245, 158, 11, 0.4);
+	color: #fbbf24;
+}
+
+.instaraw-rpg-btn-warning:hover {
+	background: rgba(245, 158, 11, 0.25);
+	border-color: rgba(245, 158, 11, 0.6);
+}
+
 .instaraw-rpg-btn-danger {
 	background: #ef4444;
 	color: #ffffff;
@@ -1004,6 +1015,88 @@
 	pointer-events: none;
 }
 
+/* === Batch Card Thumbnails === */
+.instaraw-rpg-batch-thumbnail {
+	position: relative;
+	width: 100%;
+	height: 180px;
+	border-radius: 6px;
+	overflow: hidden;
+	background: #000000;
+	border: 2px solid rgba(255, 255, 255, 0.1);
+	margin-bottom: 8px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.instaraw-rpg-batch-thumbnail img {
+	width: 100%;
+	height: 100%;
+	object-fit: contain;
+	display: block;
+}
+
+.instaraw-rpg-batch-thumbnail-latent {
+	background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a78bfa 100%);
+}
+
+/* Aspect ratio preview box (like AIL) */
+.instaraw-rpg-batch-aspect-preview {
+	width: 100px; /* Base width, aspect-ratio determines height */
+	max-height: 160px; /* Prevent tall portraits from stretching container */
+	background: rgba(255, 255, 255, 0.1);
+	border: 2px solid rgba(255, 255, 255, 0.3);
+	border-radius: 4px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 8px;
+	flex-shrink: 0;
+	margin: 10px 0; /* Breathing room */
+}
+
+.instaraw-rpg-batch-aspect-content {
+	text-align: center;
+	color: #ffffff;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 4px;
+}
+
+.instaraw-rpg-batch-thumbnail-missing {
+	background: rgba(245, 158, 11, 0.1);
+	border-color: rgba(245, 158, 11, 0.3);
+	border-style: dashed;
+}
+
+.instaraw-rpg-batch-thumbnail-placeholder {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	color: #9ca3af;
+	text-align: center;
+	padding: 8px;
+}
+
+.instaraw-rpg-batch-thumbnail-index {
+	position: absolute;
+	top: 6px;
+	left: 6px;
+	background: rgba(0, 0, 0, 0.85);
+	color: #ffffff;
+	padding: 4px 8px;
+	border-radius: 4px;
+	font-size: 12px;
+	font-weight: 700;
+	border: 1px solid rgba(255, 255, 255, 0.3);
+	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+	z-index: 10;
+}
+
+
 .instaraw-rpg-batch-item-header {
 	display: flex;
 	justify-content: space-between;
@@ -1040,6 +1133,42 @@
 .instaraw-rpg-source-badge.from-character {
 	background: rgba(236, 72, 153, 0.2);
 	color: #f9a8d4;
+}
+
+/* Repeat Count Status Badges */
+.instaraw-rpg-repeat-status {
+	font-size: 10px;
+	padding: 3px 8px;
+	border-radius: 4px;
+	font-weight: 600;
+	border: 1px solid;
+}
+
+.instaraw-rpg-repeat-match {
+	background: rgba(34, 197, 94, 0.15);
+	color: #4ade80;
+	border-color: rgba(34, 197, 94, 0.3);
+}
+
+.instaraw-rpg-repeat-mismatch {
+	background: rgba(245, 158, 11, 0.15);
+	color: #fbbf24;
+	border-color: rgba(245, 158, 11, 0.4);
+}
+
+.instaraw-rpg-crop-indicator {
+	position: absolute;
+	bottom: 4px;
+	right: 4px;
+	background: rgba(139, 92, 246, 0.85);
+	color: #ffffff;
+	font-size: 9px;
+	font-weight: 600;
+	padding: 2px 6px;
+	border-radius: 3px;
+	pointer-events: none;
+	text-transform: uppercase;
+	letter-spacing: 0.3px;
 }
 
 .instaraw-rpg-batch-delete-btn {
@@ -1095,11 +1224,14 @@
 
 /* SDXL mode now uses standard .instaraw-rpg-positive-textarea */
 
-.instaraw-rpg-batch-item-content label {
+.instaraw-rpg-batch-item-content label,
+.instaraw-rpg-thumbnail-label {
 	font-size: 11px;
 	font-weight: 500;
 	color: rgba(249, 250, 251, 0.7);
 	text-transform: uppercase;
+	display: block;
+	margin-bottom: 4px;
 }
 
 .instaraw-rpg-prompt-textarea {
@@ -1217,16 +1349,18 @@
 
 .instaraw-rpg-image-preview-grid {
 	display: grid;
-	grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
-	gap: 8px;
+	grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+	gap: 12px; /* Increased from 8px for better spacing */
 }
 
 .instaraw-rpg-preview-thumb {
+	position: relative; /* For index badge positioning */
 	width: 100%;
-	height: 60px;
-	border-radius: 4px;
+	height: 100px; /* Increased for better aspect ratio label visibility */
+	border-radius: 6px;
 	overflow: hidden;
 	background: #000000;
+	border: 2px solid rgba(255, 255, 255, 0.1);
 }
 
 .instaraw-rpg-preview-thumb img {
@@ -1510,4 +1644,121 @@
 
 .instaraw-rpg-generate-preview button {
 	margin-right: 10px;
+}
+
+/* === Mode Display Updates === */
+.instaraw-rpg-mode-indicator-container {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	flex: 1;
+}
+
+.instaraw-rpg-mode-source {
+	font-size: 11px;
+	color: #9ca3af;
+	font-style: italic;
+	padding: 4px 10px;
+	background: rgba(255, 255, 255, 0.05);
+	border-radius: 4px;
+}
+
+/* Reuse mode badges from Generate tab */
+.instaraw-rpg-mode-card .instaraw-rpg-mode-badge {
+	flex: 0 0 auto;
+}
+
+/* === Latent Preview Styles === */
+.instaraw-rpg-preview-latent {
+	position: relative;
+	width: 100%;
+	height: 120px; /* Increased for better aspect ratio visibility */
+	background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a78bfa 100%);
+	border-radius: 6px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	overflow: visible; /* Changed from hidden to show badges */
+	border: 2px solid rgba(139, 92, 246, 0.4);
+}
+
+/* Aspect ratio preview box inside latent card */
+.instaraw-rpg-preview-aspect-box {
+	width: 80px; /* Base width, aspect-ratio determines height */
+	max-height: 105px; /* Prevent tall portraits from stretching container */
+	background: rgba(255, 255, 255, 0.1);
+	border: 2px solid rgba(255, 255, 255, 0.3);
+	border-radius: 4px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 6px;
+	flex-shrink: 0;
+	margin: 7px 0; /* Breathing room */
+}
+
+.instaraw-rpg-preview-aspect-content {
+	text-align: center;
+	color: #ffffff;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 2px;
+}
+
+.instaraw-rpg-latent-content {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	color: #ffffff;
+	text-align: center;
+	padding: 4px;
+	width: 100%;
+	height: 100%;
+}
+
+.instaraw-rpg-preview-repeat {
+	position: absolute;
+	top: 4px;
+	right: 4px;
+	background: rgba(0, 0, 0, 0.85);
+	color: #ffffff;
+	padding: 2px 6px;
+	border-radius: 4px;
+	font-size: 10px;
+	font-weight: 700;
+	border: 1px solid rgba(255, 255, 255, 0.3);
+	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+/* === Index Number Badges (Preview Section) === */
+.instaraw-rpg-preview-index {
+	position: absolute;
+	top: 4px;
+	left: 4px;
+	background: rgba(0, 0, 0, 0.85);
+	color: #ffffff;
+	padding: 3px 7px;
+	border-radius: 4px;
+	font-size: 11px;
+	font-weight: 700;
+	border: 1px solid rgba(255, 255, 255, 0.3);
+	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+	z-index: 10;
+}
+
+.instaraw-rpg-preview-aspect-label {
+	position: absolute;
+	bottom: 4px;
+	right: 4px;
+	background: rgba(0, 0, 0, 0.85);
+	color: #ffffff;
+	padding: 3px 7px;
+	border-radius: 4px;
+	font-size: 10px;
+	font-weight: 600;
+	border: 1px solid rgba(255, 255, 255, 0.2);
+	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+	z-index: 10;
 }
