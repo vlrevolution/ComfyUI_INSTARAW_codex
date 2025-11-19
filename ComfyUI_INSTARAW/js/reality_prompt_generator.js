@@ -514,7 +514,7 @@ app.registerExtension({
 						<div class="instaraw-rpg-footer">
 							<div class="instaraw-rpg-stats">
 								<span class="instaraw-rpg-stat-badge">Gen: ${totalGenerations}</span>
-								<span class="instaraw-rpg-stat-label">${resolvedMode}</span>
+								<span class="instaraw-rpg-stat-label">${detectedMode === 'img2img' ? 'IMG2IMG' : 'TXT2IMG'}</span>
 								${node._linkedAILNodeId ? `<span class="instaraw-rpg-stat-label">AIL #${node._linkedAILNodeId}</span>` : `<span class="instaraw-rpg-stat-label">No AIL</span>`}
 							</div>
 						</div>
