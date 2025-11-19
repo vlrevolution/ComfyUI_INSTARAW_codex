@@ -560,7 +560,7 @@
 .instaraw-rpg-prompt-preview {
 	font-size: 12px;
 	color: rgba(249, 250, 251, 0.8);
-	line-height: 1.4;
+	line-height: 1.42;
 	margin-bottom: 8px;
 }
 
@@ -657,7 +657,7 @@
 .instaraw-rpg-prompt-preview-small {
 	font-size: 11px;
 	color: rgba(249, 250, 251, 0.5);
-	line-height: 1.4;
+	line-height: 1.42;
 	font-style: italic;
 }
 
@@ -759,7 +759,7 @@
 	min-height: 90px;
 	resize: vertical;
 	font-family: 'Inter', sans-serif;
-	line-height: 1.4;
+	line-height: 1.42;
 }
 
 .instaraw-rpg-creative-header h3 {
@@ -805,7 +805,7 @@
 .instaraw-rpg-inspiration-text {
 	font-size: 11px;
 	color: rgba(249, 250, 251, 0.7);
-	line-height: 1.4;
+	line-height: 1.42;
 }
 
 .instaraw-rpg-creative-controls {
@@ -859,6 +859,7 @@
 	font-family: 'Inter', monospace;
 	outline: none;
 	resize: vertical;
+	line-height: 1.42;
 }
 
 .instaraw-rpg-character-ref-input:focus {
@@ -904,7 +905,7 @@
 	margin: 0;
 	font-size: 12px;
 	color: rgba(249, 250, 251, 0.8);
-	line-height: 1.4;
+	line-height: 1.42;
 }
 
 /* === Batch Panel === */
@@ -1210,7 +1211,7 @@
 
 .instaraw-rpg-batch-tags-text {
 	font-size: 12px;
-	line-height: 1.6;
+	line-height: 1.42;
 	color: rgba(249, 250, 251, 0.9);
 	padding: 10px;
 	background: rgba(167, 139, 250, 0.08);
@@ -1245,7 +1246,7 @@
 	font-family: 'Inter', monospace;
 	outline: none;
 	resize: none;
-	line-height: 1.4;
+	line-height: 1.42;
 	min-height: 64px;
 	overflow-y: hidden;
 }
@@ -1541,7 +1542,7 @@
 	margin: 6px 0 0 0;
 	font-size: 12px;
 	color: #d1d5db;
-	line-height: 1.5;
+	line-height: 1.42;
 }
 
 .instaraw-rpg-checkbox-grid {
@@ -1582,6 +1583,25 @@
 
 .instaraw-rpg-txt2img-settings {
 	margin-top: 12px;
+}
+
+.instaraw-rpg-user-text-input {
+	width: 100%;
+	background: rgba(255, 255, 255, 0.06);
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	color: #f9fafb;
+	padding: 10px 12px;
+	border-radius: 4px;
+	font-size: 13px;
+	font-family: 'Inter', sans-serif;
+	outline: none;
+	resize: vertical;
+	line-height: 1.42;
+}
+
+.instaraw-rpg-user-text-input:focus {
+	border-color: #a78bfa;
+	background: rgba(255, 255, 255, 0.08);
 }
 
 .instaraw-rpg-library-controls {
