@@ -326,6 +326,7 @@ app.registerExtension({
                         </div>`;
 					setupEventHandlers();
 					setupDragAndDrop();
+					setupFileDropZone();
 					updateCachedHeight();
 
 					// Dispatch update event for other nodes (e.g., RPG)
@@ -454,6 +455,7 @@ app.registerExtension({
                         </div>`;
 					setupTxt2ImgEventHandlers();
 					setupDragAndDrop();
+					setupFileDropZone();
 					updateCachedHeight();
 
 					// Dispatch update event for other nodes (e.g., RPG)
@@ -825,6 +827,96 @@ app.registerExtension({
 							syncBatchDataWidget();
 							renderGallery();
 						});
+					});
+				};
+
+				const setupFileDropZone = () => {
+					// Prevent duplicate listeners
+					if (container._hasFileDropListeners) return;
+					container._hasFileDropListeners = true;
+
+					let dragCounter = 0; // Track nested drag events
+
+					const handleFileDrop = async (files) => {
+						if (files.length === 0) return;
+
+						const uploadBtn = container.querySelector(".instaraw-adv-loader-upload-btn");
+						if (!uploadBtn) return;
+
+						const originalText = uploadBtn.textContent;
+						uploadBtn.textContent = "⏳ Uploading...";
+						uploadBtn.disabled = true;
+
+						try {
+							const formData = new FormData();
+							formData.append("node_id", node.id);
+							files.forEach((file) => formData.append("files", file));
+							const response = await fetch("/instaraw/batch_upload", { method: "POST", body: formData });
+							const result = await response.json();
+							if (result.success) {
+								const batchData = JSON.parse(node.properties.batch_data || "{}");
+								batchData.images = batchData.images || [];
+								batchData.order = batchData.order || [];
+								result.images.forEach((img) => {
+									batchData.images.push(img);
+									batchData.order.push(img.id);
+								});
+								batchData.total_count = batchData.images.reduce((sum, img) => sum + (img.repeat_count || 1), 0);
+								node.properties.batch_data = JSON.stringify(batchData);
+								syncBatchDataWidget();
+								renderGallery();
+							} else {
+								alert(`Upload failed: ${result.error}`);
+							}
+						} catch (error) {
+							alert(`Upload error: ${error.message}`);
+						} finally {
+							uploadBtn.textContent = originalText;
+							uploadBtn.disabled = false;
+						}
+					};
+
+					container.addEventListener("dragenter", (e) => {
+						e.preventDefault();
+						e.stopPropagation();
+						dragCounter++;
+						if (e.dataTransfer.types.includes("Files")) {
+							container.classList.add("instaraw-adv-loader-drag-over");
+						}
+					});
+
+					container.addEventListener("dragover", (e) => {
+						e.preventDefault();
+						e.stopPropagation();
+						if (e.dataTransfer.types.includes("Files")) {
+							e.dataTransfer.dropEffect = "copy";
+						}
+					});
+
+					container.addEventListener("dragleave", (e) => {
+						e.preventDefault();
+						e.stopPropagation();
+						dragCounter--;
+						if (dragCounter === 0) {
+							container.classList.remove("instaraw-adv-loader-drag-over");
+						}
+					});
+
+					container.addEventListener("drop", (e) => {
+						e.preventDefault();
+						e.stopPropagation();
+						dragCounter = 0;
+						container.classList.remove("instaraw-adv-loader-drag-over");
+
+						// Only handle file drops, not reordering
+						if (e.dataTransfer.getData("text/plain") === "instaraw-reorder") {
+							return; // Let the reordering handler deal with this
+						}
+
+						const files = Array.from(e.dataTransfer.files).filter(file => file.type.startsWith("image/"));
+						if (files.length > 0) {
+							handleFileDrop(files);
+						}
 					});
 				};
 

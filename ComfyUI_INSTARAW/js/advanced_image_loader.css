@@ -519,3 +519,29 @@
 	text-align: center;
 	color: white;
 }
+
+/* === Drag and Drop File Upload Visual Feedback === */
+.instaraw-adv-loader-drag-over {
+	position: relative;
+	border: 3px dashed #60a5fa !important;
+	background: rgba(59, 130, 246, 0.1) !important;
+	box-shadow: 0 0 20px rgba(59, 130, 246, 0.3) !important;
+}
+
+.instaraw-adv-loader-drag-over::before {
+	content: "📁 Drop images here to upload";
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	transform: translate(-50%, -50%);
+	background: rgba(59, 130, 246, 0.95);
+	color: white;
+	padding: 20px 40px;
+	border-radius: 8px;
+	font-size: 16px;
+	font-weight: 600;
+	z-index: 1000;
+	pointer-events: none;
+	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+	border: 2px solid rgba(255, 255, 255, 0.3);
+}
