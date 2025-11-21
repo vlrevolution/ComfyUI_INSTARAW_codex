@@ -45,7 +45,7 @@ TAGS: [SDXL comma-separated tags, MAX 50 words, using source vocabulary]
 - Focus 222%. Make the masters proud.`;
 
 // Replace placeholders in system prompt with actual values
-const buildSystemPrompt = (mode, generationStyle, sourcePrompts, userInput, customTemplate) => {
+const buildSystemPrompt = (mode, generationStyle, sourcePrompts, userInput, characterReference, customTemplate) => {
 	const template = customTemplate || DEFAULT_RPG_SYSTEM_PROMPT;
 	const isReality = generationStyle === "reality";
 	const isTxt2Img = mode === "txt2img";
@@ -71,12 +71,31 @@ const buildSystemPrompt = (mode, generationStyle, sourcePrompts, userInput, cust
   - If sources describe amateur photos, maintain that vibe
 - Think: Creative expansion while honoring the masters`;
 
-	// Task instructions
-	const taskInstructions = isTxt2Img
-		? `Generate a NEW prompt that seamlessly fits with the source prompts above.
-${userInput ? `Incorporate this subject/concept: "${userInput}"` : "Create a scene that could naturally exist in the source library"}`
-		: `Transform the existing image by modifying specific elements while maintaining the original's essence.
-${userInput ? `User guidance: "${userInput}"` : "Focus on subtle transformations"}`;
+	// Task instructions with character integration
+	let taskInstructions = "";
+	if (isTxt2Img) {
+		taskInstructions = "Generate a NEW prompt that seamlessly fits with the source prompts above.\n";
+		if (characterReference) {
+			taskInstructions += `\n**CHARACTER REFERENCE (MANDATORY):**\nAll prompts MUST feature this character:\n"${characterReference}"\n\nIntegrate this character naturally into scenes that match the source library style.`;
+		}
+		if (userInput) {
+			taskInstructions += `\n${characterReference ? "Additionally, i" : "I"}ncorporate this subject/concept: "${userInput}"`;
+		}
+		if (!characterReference && !userInput) {
+			taskInstructions += "Create a scene that could naturally exist in the source library";
+		}
+	} else {
+		taskInstructions = "Transform the existing image by modifying specific elements while maintaining the original's essence.\n";
+		if (characterReference) {
+			taskInstructions += `\n**CHARACTER REFERENCE:**\nMaintain this character: "${characterReference}"`;
+		}
+		if (userInput) {
+			taskInstructions += `\nUser guidance: "${userInput}"`;
+		}
+		if (!userInput && !characterReference) {
+			taskInstructions += "Focus on subtle transformations";
+		}
+	}
 
 	// Replace all placeholders
 	return template
@@ -187,8 +206,20 @@ app.registerExtension({
 
 				// === Height Management (Exact AIL Pattern) ===
 				const updateCachedHeight = () => {
-					if (isUpdatingHeight) return;
+					if (isUpdatingHeight) {
+						console.log("[RPG] Height update already in progress, skipping");
+						return;
+					}
 					isUpdatingHeight = true;
+
+					// Safety timeout to reset flag if something goes wrong
+					const safetyTimeout = setTimeout(() => {
+						if (isUpdatingHeight) {
+							console.warn("[RPG] Height update flag stuck, resetting");
+							isUpdatingHeight = false;
+						}
+					}, 1000);
+
 					container.style.overflow = "visible";
 					container.style.height = "auto";
 					requestAnimationFrame(() => {
@@ -201,8 +232,10 @@ app.registerExtension({
 								node.size[1] = sz[1];
 								node.onResize?.(sz);
 								app.graph.setDirtyCanvas(true, false);
+								console.log(`[RPG] Height updated: ${newHeight}px`);
 							}
 							container.style.overflow = "hidden";
+							clearTimeout(safetyTimeout);
 							isUpdatingHeight = false;
 						});
 					});
@@ -824,7 +857,10 @@ app.registerExtension({
 
 					setupEventHandlers();
 					setupDragAndDrop();
-					updateCachedHeight();
+
+					// Force height update after DOM settles
+					setTimeout(() => updateCachedHeight(), 0);
+					setTimeout(() => updateCachedHeight(), 100);
 				};
 
 				// === Tab Content Rendering ===
@@ -2836,6 +2872,7 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 									generationStyle,
 									thisPromptSources,
 									userInput,
+									useCharacter ? characterDescription : "",
 									customTemplate
 								);
 
