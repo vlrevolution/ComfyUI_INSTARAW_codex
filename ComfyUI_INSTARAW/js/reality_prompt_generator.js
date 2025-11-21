@@ -2677,10 +2677,8 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 					});
 
 					try {
-						// PARALLEL generation with 222ms stagger
-						console.log(`[RPG] 🚀 Launching ${generationCount} parallel requests with 222ms stagger...`);
-
-						const generateSinglePrompt = async (index) => {
+						// Sequential generation: Loop through each prompt
+						for (let i = 0; i < generationCount; i++) {
 							// Check if cancelled
 							if (cancelRequested) {
 								console.log(`[RPG] ⏹ Generation cancelled at prompt ${i + 1}/${generationCount}`);
@@ -2788,52 +2786,69 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 										const rawPrompt = result.prompts[0];
 										console.log(`[RPG] 📄 Raw response from API:`, rawPrompt);
 
-										// Parse line-based format with prefixes
-										if (typeof rawPrompt === 'string') {
-											const parseStructuredPrompt = (text) => {
-												const lines = text.split('\n').map(l => l.trim()).filter(l => l);
-												const parsed = {
-													positive: "",
-													negative: "",
-													tags: [],
-													classification: {
-														content_type: "other",
-														safety_level: "sfw",
-														shot_type: "other"
-													}
-												};
-
-												lines.forEach(line => {
-													if (line.startsWith('POSITIVE:')) {
-														parsed.positive = line.substring(9).trim();
-													} else if (line.startsWith('NEGATIVE:')) {
-														parsed.negative = line.substring(9).trim();
-													} else if (line.startsWith('CONTENT_TYPE:')) {
-														parsed.classification.content_type = line.substring(13).trim().toLowerCase();
-													} else if (line.startsWith('SAFETY_LEVEL:')) {
-														parsed.classification.safety_level = line.substring(13).trim().toLowerCase();
-													} else if (line.startsWith('SHOT_TYPE:')) {
-														parsed.classification.shot_type = line.substring(10).trim().toLowerCase();
-													} else if (line.startsWith('TAGS:')) {
-														const tagsStr = line.substring(5).trim();
-														parsed.tags = tagsStr.split(',').map(t => t.trim()).filter(t => t);
-													}
-												});
-
-												// Fallback: if no POSITIVE field found, use entire text as positive
-												if (!parsed.positive && text) {
-													parsed.positive = text;
+										const parseStructuredPrompt = (text) => {
+											const lines = text.split('\n').map(l => l.trim()).filter(l => l);
+											const parsed = {
+												positive: "",
+												negative: "",
+												tags: [],
+												classification: {
+													content_type: "other",
+													safety_level: "sfw",
+													shot_type: "other"
 												}
-
-												return parsed;
 											};
 
+											lines.forEach(line => {
+												if (line.startsWith('POSITIVE:')) {
+													parsed.positive = line.substring(9).trim();
+												} else if (line.startsWith('NEGATIVE:')) {
+													parsed.negative = line.substring(9).trim();
+												} else if (line.startsWith('CONTENT_TYPE:')) {
+													parsed.classification.content_type = line.substring(13).trim().toLowerCase();
+												} else if (line.startsWith('SAFETY_LEVEL:')) {
+													parsed.classification.safety_level = line.substring(13).trim().toLowerCase();
+												} else if (line.startsWith('SHOT_TYPE:')) {
+													parsed.classification.shot_type = line.substring(10).trim().toLowerCase();
+												} else if (line.startsWith('TAGS:')) {
+													const tagsStr = line.substring(5).trim();
+													parsed.tags = tagsStr.split(',').map(t => t.trim()).filter(t => t);
+												}
+											});
+
+											if (!parsed.positive && text) {
+												parsed.positive = text;
+											}
+
+											return parsed;
+										};
+
+										// Handle different response formats
+										if (typeof rawPrompt === 'string') {
+											// Format 1: Plain string with line-based format
 											promptResult = parseStructuredPrompt(rawPrompt);
-											console.log(`[RPG] ✅ Prompt ${i + 1} parsed from structured format`);
+											console.log(`[RPG] ✅ Prompt ${i + 1} parsed from string format`);
+										} else if (rawPrompt.prompt) {
+											// Format 2: Object with 'prompt' field containing structured text
+											promptResult = parseStructuredPrompt(rawPrompt.prompt);
+											console.log(`[RPG] ✅ Prompt ${i + 1} parsed from prompt field`);
+										} else if (rawPrompt.POSITIVE) {
+											// Format 3: Object with uppercase keys
+											promptResult = {
+												positive: rawPrompt.POSITIVE || "",
+												negative: rawPrompt.NEGATIVE || "",
+												tags: typeof rawPrompt.TAGS === 'string' ? rawPrompt.TAGS.split(',').map(t => t.trim()).filter(t => t) : (rawPrompt.TAGS || []),
+												classification: {
+													content_type: (rawPrompt.CONTENT_TYPE || "other").toLowerCase(),
+													safety_level: (rawPrompt.SAFETY_LEVEL || "sfw").toLowerCase(),
+													shot_type: (rawPrompt.SHOT_TYPE || "other").toLowerCase()
+												}
+											};
+											console.log(`[RPG] ✅ Prompt ${i + 1} parsed from uppercase object`);
 										} else {
-											// API returned an object (legacy format)
+											// Format 4: Legacy object with lowercase keys
 											promptResult = rawPrompt;
-											console.log(`[RPG] ✅ Prompt ${i + 1} received as object`);
+											console.log(`[RPG] ✅ Prompt ${i + 1} using legacy format`);
 										}
 
 										console.log(`[RPG] 📦 Prompt ${i + 1} final:`, {
