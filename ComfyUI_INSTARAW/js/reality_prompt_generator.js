@@ -7,52 +7,86 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
+// System prompt template with placeholders
 const DEFAULT_RPG_SYSTEM_PROMPT = `You are a Visual Prompt Architect specializing in photorealistic Stable Diffusion prompts.
 
-# YOUR MISSION
-You will receive SOURCE PROMPTS from a curated library. These are GOLD STANDARD examples. Your job is to LEARN FROM THEM and generate NEW prompts that seamlessly fit into this library - as if they were created by the same expert who wrote the originals.
+# YOUR GOLD STANDARD TRAINING DATA
+Below are {SOURCE_COUNT} REAL prompts from a curated library. These are your ONLY reference - study them forensically:
 
-# THE SOURCE PROMPTS ARE YOUR TRAINING DATA
-Analyze the provided source_prompts deeply:
-- VOCABULARY: Extract every descriptive word, technical term, camera setting, lighting phrase, composition term
-- PATTERNS: How do they structure scene descriptions? What order? What emphasis?
-- STYLE: Level of detail, technical precision, specific vs generic language
-- AUTHENTICITY: Do they describe amateur photos, professional shots, candid moments, staged scenes?
+{SOURCE_PROMPTS}
 
-# MODE-SPECIFIC GENERATION RULES
+# ANALYSIS PHASE (CRITICAL)
+Before generating, analyze the source prompts above:
+- VOCABULARY: List every unique word, phrase, camera term, lighting descriptor, technical detail
+- OPENING PATTERNS: Notice how they start - "An authentic iPhone selfie...", "A professional DSLR photo...", "A candid smartphone shot..."
+- STRUCTURE: Subject → Setting → Camera/Lighting → Technical Quality → Mood
+- AUTHENTICITY MARKERS: Do they say "authentic", "candid", "amateur"? Include these!
+- TECHNICAL DEPTH: Do they list camera settings (f/1.8, ISO 100)? Match this!
 
-**REALITY MODE (generation_style: "reality"):**
-- STRICT REMIX: You may ONLY use words, phrases, and descriptors that appear in the source prompts
-- Treat source prompts as your ONLY vocabulary - no external words allowed
-- Recombine, rearrange, and remix these elements to create new but familiar scenes
-- If source prompts focus on "natural lighting, bokeh background, candid moment" - your outputs must use EXACTLY this vocabulary
-- Think: forensic precision, staying true to the training data
+# GENERATION MODE: {GENERATION_MODE}
 
-**CREATIVE MODE (generation_style: "creative"):**
-- INSPIRED REMIX: Source prompts are your foundation and style guide
-- You may introduce NEW concepts, but maintain the same:
-  - Technical precision (if sources use f/1.8, ISO 100, you do too)
-  - Descriptive patterns (if sources describe lighting first, you do too)
-  - Authenticity level (if sources describe amateur photos, maintain that vibe)
-- Think: creative expansion while honoring the masters
+{MODE_RULES}
 
-# OUTPUT FORMAT (EXACT - BACKEND DEPENDS ON THIS)
-POSITIVE: [Your generated positive prompt, 150-300 words, photorealistic, detailed]
-NEGATIVE: [Quality issues to avoid - learn from source negative prompts]
+# TASK: {TASK_TYPE}
+{TASK_INSTRUCTIONS}
+
+# OUTPUT FORMAT (EXACT)
+POSITIVE: [Your generated prompt, 150-300 words, matching source style and vocabulary]
+NEGATIVE: [Learn from source negatives - list quality issues to avoid]
 CONTENT_TYPE: person|landscape|architecture|object|animal|abstract|other
 SAFETY_LEVEL: sfw|suggestive|nsfw
 SHOT_TYPE: portrait|full_body|close_up|wide_angle|other
-TAGS: [SDXL comma-separated tags, MAX 50 words total, learned from source prompt vocabulary]
+TAGS: [SDXL comma-separated tags, MAX 50 words, using source vocabulary]
 
-# CRITICAL RULES
+# CRITICAL
 - Use EXACT prefixes (POSITIVE:, NEGATIVE:, etc.)
 - ONE line per field (no line breaks within fields)
-- Study user_input for subject/concept, but use SOURCE PROMPT vocabulary/style to describe it
-- If no user_input: generate a scene that could naturally exist in the source prompt library
-- Match the AUTHENTICITY of sources: if they describe amateur iPhone photos, yours should too
-- Match the TECHNICAL DEPTH: if sources list camera settings, yours must too
+- Your output must be INDISTINGUISHABLE from the source prompts
+- Focus 222%. Make the masters proud.`;
 
-Focus 222%. Generate prompts so good they're indistinguishable from the masters.`;
+// Replace placeholders in system prompt with actual values
+const buildSystemPrompt = (mode, generationStyle, sourcePrompts, userInput, customTemplate) => {
+	const template = customTemplate || DEFAULT_RPG_SYSTEM_PROMPT;
+	const isReality = generationStyle === "reality";
+	const isTxt2Img = mode === "txt2img";
+
+	// Format source prompts
+	const sourcePromptsText = sourcePrompts.map((sp, idx) =>
+		`[SOURCE ${idx + 1}]\nPOSITIVE: ${sp.positive_prompt}\nNEGATIVE: ${sp.negative_prompt || "none"}`
+	).join("\n\n");
+
+	// Mode-specific rules
+	const modeRules = isReality
+		? `**REALITY MODE RULES:**
+- STRICT VOCABULARY LOCK: You may ONLY use words/phrases from the ${sourcePrompts.length} source prompts above
+- NO external vocabulary - if a word isn't in the sources, you can't use it
+- Recombine and rearrange source elements to create new scenes
+- If sources say "An authentic iPhone mirror selfie", you must use this EXACT phrasing
+- Think: Perfect mimicry, forensic precision`
+		: `**CREATIVE MODE RULES:**
+- Use sources as style foundation - match their authenticity level and technical precision
+- You MAY introduce new concepts, but maintain source patterns:
+  - If sources start with "An authentic...", yours should too
+  - If sources list camera settings, yours must too
+  - If sources describe amateur photos, maintain that vibe
+- Think: Creative expansion while honoring the masters`;
+
+	// Task instructions
+	const taskInstructions = isTxt2Img
+		? `Generate a NEW prompt that seamlessly fits with the source prompts above.
+${userInput ? `Incorporate this subject/concept: "${userInput}"` : "Create a scene that could naturally exist in the source library"}`
+		: `Transform the existing image by modifying specific elements while maintaining the original's essence.
+${userInput ? `User guidance: "${userInput}"` : "Focus on subtle transformations"}`;
+
+	// Replace all placeholders
+	return template
+		.replace(/{SOURCE_COUNT}/g, sourcePrompts.length.toString())
+		.replace(/{SOURCE_PROMPTS}/g, sourcePromptsText)
+		.replace(/{GENERATION_MODE}/g, isReality ? "REALITY (STRICT REMIX)" : "CREATIVE (INSPIRED REMIX)")
+		.replace(/{MODE_RULES}/g, modeRules)
+		.replace(/{TASK_TYPE}/g, isTxt2Img ? "TXT2IMG GENERATION" : "IMG2IMG TRANSFORMATION")
+		.replace(/{TASK_INSTRUCTIONS}/g, taskInstructions);
+};
 const REMOTE_PROMPTS_DB_URL = "https://instara.s3.us-east-1.amazonaws.com/prompts.db.json";
 const CREATIVE_MODEL_OPTIONS = [
 	{ value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
@@ -1371,12 +1405,8 @@ app.registerExtension({
 									</div>
 								</div>
 							` : `
-								<!-- txt2img: User Input & Library Inspiration -->
+								<!-- txt2img: Library Inspiration & User Input -->
 								<div class="instaraw-rpg-txt2img-settings">
-									<div class="instaraw-rpg-control-group">
-										<label style="font-size: 13px; font-weight: 500;">Subject / Instructions (optional)</label>
-										<textarea class="instaraw-rpg-user-text-input instaraw-rpg-prompt-textarea" placeholder="e.g., 'a woman in a red dress' or 'sunset lighting' - AI will incorporate this into the generated prompts using library vocabulary..." rows="3" style="line-height: 1.42; font-size: 12px;">${escapeHtml(node.properties.user_text_input || "")}</textarea>
-									</div>
 									<div class="instaraw-rpg-library-controls">
 										<label style="font-size: 13px; font-weight: 500; margin-bottom: 6px; display: block;">Library Inspiration</label>
 										${(() => {
@@ -1392,19 +1422,21 @@ app.registerExtension({
 
 											return `
 												<div style="background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.2); border-radius: 4px; padding: 10px; margin-bottom: 8px;">
-													<div style="font-size: 11px; color: #c7d2fe; line-height: 1.5; margin-bottom: 8px;">
-														💡 AI randomly selects prompts from your library, learns their vocabulary & style, then generates new prompts that seamlessly match
-													</div>
-													<div style="display: flex; align-items: center; justify-content: space-between; font-size: 11px;">
-														<span style="color: #9ca3af;">Available prompts:</span>
-														<div style="display: flex; align-items: center; gap: 8px;">
-															<span style="font-weight: 600; color: ${hasActiveFilters ? '#818cf8' : '#e5e7eb'};">
-																${filteredCount.toLocaleString()}${hasActiveFilters ? ` / ${totalCount.toLocaleString()}` : ''}
-															</span>
-															${hasActiveFilters ? `<span style="font-size: 10px; color: #818cf8;">✓ Filtered</span>` : ''}
-															<button class="instaraw-rpg-btn-text instaraw-rpg-open-library-tab-btn" style="font-size: 10px; padding: 3px 8px; opacity: 0.8;" title="Open Library tab to adjust filters">
-																⚙️
-															</button>
+													<div style="display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center;">
+														<div style="font-size: 11px; color: #c7d2fe; line-height: 1.4;">
+															💡 AI randomly selects prompts, learns their vocabulary & style, generates new prompts that seamlessly match
+														</div>
+														<div style="text-align: right; white-space: nowrap;">
+															<div style="font-size: 10px; color: #9ca3af; margin-bottom: 2px;">Available prompts</div>
+															<div style="display: flex; align-items: center; gap: 6px; justify-content: flex-end;">
+																<span style="font-weight: 600; font-size: 12px; color: ${hasActiveFilters ? '#818cf8' : '#e5e7eb'};">
+																	${filteredCount.toLocaleString()}${hasActiveFilters ? ` / ${totalCount.toLocaleString()}` : ''}
+																</span>
+																${hasActiveFilters ? `<span style="font-size: 9px; color: #818cf8; background: rgba(129, 140, 248, 0.15); padding: 2px 6px; border-radius: 3px;">✓ Filtered</span>` : ''}
+																<button class="instaraw-rpg-btn-text instaraw-rpg-open-library-tab-btn" style="font-size: 10px; padding: 2px 6px; opacity: 0.8;" title="Open Library tab to adjust filters">
+																	⚙️
+																</button>
+															</div>
 														</div>
 													</div>
 												</div>
@@ -1415,6 +1447,10 @@ app.registerExtension({
 												</div>
 											`;
 										})()}
+									</div>
+									<div class="instaraw-rpg-control-group" style="margin-top: 12px;">
+										<label style="font-size: 13px; font-weight: 500;">Subject / Instructions (optional)</label>
+										<textarea class="instaraw-rpg-user-text-input instaraw-rpg-prompt-textarea" placeholder="e.g., 'a woman in a red dress' or 'sunset lighting' - AI will incorporate this into the generated prompts using library vocabulary..." rows="3" style="line-height: 1.42; font-size: 12px;">${escapeHtml(node.properties.user_text_input || "")}</textarea>
 									</div>
 								</div>
 							`}
@@ -2657,42 +2693,38 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 						inspirationCount = parseInt(inspirationCountInput?.value || "3");
 					}
 
-					// Select source prompts based on mode
-					let sourcePrompts = [];
+					// Prepare source prompt pool (each generation will sample from this)
+					let sourcePromptPool = [];
 					if (detectedMode === 'txt2img' && inspirationCount > 0) {
-						// TXT2IMG: Select random prompts from library based on current filters
+						// TXT2IMG: Build filtered pool for sampling
 						const filters = JSON.parse(node.properties.library_filters || "{}");
-						const filteredPrompts = filterPrompts(promptsDatabase, filters);
+						sourcePromptPool = filterPrompts(promptsDatabase, filters);
 
-						if (filteredPrompts.length > 0) {
-							const selectedCount = Math.min(inspirationCount, filteredPrompts.length);
-							const shuffled = [...filteredPrompts].sort(() => Math.random() - 0.5);
-							sourcePrompts = shuffled.slice(0, selectedCount).map(p => ({
-								source_id: p.id,
-								positive_prompt: p.prompt?.positive || p.positive || "",
-								negative_prompt: p.prompt?.negative || p.negative || ""
-							}));
-							console.log(`[RPG] 🎲 Selected ${sourcePrompts.length} random prompts from library (${filteredPrompts.length} available after filters)`);
-						} else {
+						if (sourcePromptPool.length === 0) {
 							console.warn("[RPG] ⚠️ No prompts available after filtering - generating without inspiration");
+							alert("No prompts match the current filters. Adjust filters or generate without inspiration.");
+							return;
 						}
+						console.log(`[RPG] 🎲 Prepared pool of ${sourcePromptPool.length} prompts for sampling (each generation gets unique ${inspirationCount} prompts)`);
 					} else if (detectedMode === 'img2img') {
-						// IMG2IMG: Use prompts from batch
+						// IMG2IMG: Use batch prompts as pool
 						const promptQueue = parsePromptBatch();
-						sourcePrompts = promptQueue.filter((p) => p.source_id).slice(0, inspirationCount);
+						sourcePromptPool = promptQueue.filter((p) => p.source_id);
+						if (sourcePromptPool.length === 0) {
+							alert("No prompts in batch to use as inspiration for img2img mode.");
+							return;
+						}
 					}
 
 					// Get model and settings
 					const modelWidget = node.widgets?.find((w) => w.name === "creative_model");
 					const model = modelWidget?.value || node.properties.creative_model || "gemini-2.5-pro";
-
-					// Use custom system prompt if set, otherwise use default
-					const systemPrompt = node.properties.creative_system_prompt || DEFAULT_RPG_SYSTEM_PROMPT;
+					const generationStyle = node.properties.generation_style || "reality";
 
 					const temperatureValue = parseFloat(node.properties.creative_temperature ?? 0.9) || 0.9;
 					const topPValue = parseFloat(node.properties.creative_top_p ?? 0.9) || 0.9;
 
-					console.log(`[RPG] 🔧 Using system prompt (${systemPrompt.length} chars):`, systemPrompt.slice(0, 150) + "...");
+					console.log(`[RPG] 🔧 Generation mode: ${detectedMode}, style: ${generationStyle}`);
 
 					console.log("[RPG] Configuration:", {
 						mode: detectedMode,
@@ -2757,31 +2789,6 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 							progressItems.appendChild(progressItem);
 						}
 
-						// Display source prompts (inspiration sources)
-						if (sourcePrompts.length > 0) {
-							const sourcePromptsSection = document.createElement("div");
-							sourcePromptsSection.className = "instaraw-rpg-source-prompts-section";
-							sourcePromptsSection.style.cssText = "margin-top: 16px; padding: 12px; background: rgba(139, 92, 246, 0.08); border: 1px solid rgba(139, 92, 246, 0.2); border-radius: 4px;";
-							sourcePromptsSection.innerHTML = `
-								<div style="font-size: 12px; font-weight: 600; color: #c4b5fd; margin-bottom: 8px;">
-									🎨 Drawing Inspiration From:
-								</div>
-								${sourcePrompts.map((sp, idx) => {
-									const promptData = promptsDatabase.find(p => p.id === sp.source_id);
-									const sourceLabel = promptData?.is_user_created ? '📝 User' : promptData?.is_ai_generated ? '✨ Generated' : '📚 Library';
-									return `
-										<div style="background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 4px; padding: 6px 8px; margin-bottom: 4px; font-size: 11px;">
-											<div style="color: #8b5cf6; font-weight: 600; margin-bottom: 2px;">#${idx + 1} ${sourceLabel}</div>
-											<div style="color: #d1d5db; line-height: 1.3;">
-												${escapeHtml(sp.positive_prompt.slice(0, 120))}${sp.positive_prompt.length > 120 ? '...' : ''}
-											</div>
-										</div>
-									`;
-								}).join('')}
-							`;
-							progressItems.appendChild(sourcePromptsSection);
-						}
-
 						// Resize node to fit progress UI
 						updateCachedHeight();
 					}
@@ -2806,6 +2813,29 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 							const messageDiv = progressItem?.querySelector(".instaraw-rpg-progress-item-message");
 
 							try {
+								// Sample UNIQUE source prompts for THIS generation
+								let thisPromptSources = [];
+								if (sourcePromptPool.length > 0) {
+									const sampleCount = Math.min(inspirationCount, sourcePromptPool.length);
+									const shuffled = [...sourcePromptPool].sort(() => Math.random() - 0.5);
+									thisPromptSources = shuffled.slice(0, sampleCount).map(p => ({
+										source_id: p.id,
+										positive_prompt: p.prompt?.positive || p.positive || "",
+										negative_prompt: p.prompt?.negative || p.negative || ""
+									}));
+								}
+
+								// Build dynamic system prompt with actual source prompt text
+								// If user has custom template, use it; otherwise use default
+								const customTemplate = node.properties.creative_system_prompt;
+								const dynamicSystemPrompt = buildSystemPrompt(
+									detectedMode,
+									generationStyle,
+									thisPromptSources,
+									userInput,
+									customTemplate
+								);
+
 								// Update status to in-progress
 								if (progressItem) progressItem.classList.add("in-progress");
 								if (statusBadge) {
@@ -2817,11 +2847,11 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 									progressBar.classList.add("animating");
 								}
 
-								console.log(`[RPG] 📝 [${i + 1}] Starting generation...`);
+								console.log(`[RPG] 📝 [${i + 1}] Starting generation with ${thisPromptSources.length} unique source prompts...`);
 
 								// Build payload
 								const payload = {
-									source_prompts: sourcePrompts.map((p) => ({
+									source_prompts: thisPromptSources.map((p) => ({
 										id: p.source_id,
 										prompt: { positive: p.positive_prompt, negative: p.negative_prompt },
 									})),
@@ -2832,14 +2862,14 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 									model: model,
 									gemini_api_key: geminiApiKey,
 									grok_api_key: grokApiKey,
-									system_prompt: systemPrompt,
+									system_prompt: dynamicSystemPrompt,
 									temperature: temperatureValue,
 									top_p: topPValue,
 									force_regenerate: forceRegenerate,
 									mode: detectedMode,
 									affect_elements: affectElements,
 									user_input: userInput,
-									generation_style: node.properties.generation_style || "reality"
+									generation_style: generationStyle
 								};
 
 								// Retry logic
