@@ -1765,7 +1765,7 @@ app.registerExtension({
 
 				const highlightSearchTerm = (text, searchQuery) => {
 					if (!text || !searchQuery) return escapeHtml(text);
-					const regex = new RegExp(`(${searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\$&')})`, 'gi');
+					const regex = new RegExp(`(${searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
 					return escapeHtml(text).replace(regex, '<mark class="instaraw-rpg-highlight">$1</mark>');
 				};
 
@@ -2677,156 +2677,260 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 					});
 
 					try {
-						// PARALLEL GENERATION with 222ms stagger
-						const generateSinglePrompt = async (index) => {
-							const i = index;
+						// Sequential generation: Loop through each prompt
+						for (let i = 0; i < generationCount; i++) {
+							// Check if cancelled
+							if (cancelRequested) {
+								console.log(`[RPG] ⏹ Generation cancelled at prompt ${i + 1}/${generationCount}`);
+								break;
+							}
+
 							const progressItem = progressItems?.querySelector(`[data-index="${i}"]`);
 							const statusBadge = progressItem?.querySelector(".instaraw-rpg-progress-item-status");
 							const progressBar = progressItem?.querySelector(".instaraw-rpg-progress-item-fill");
 							const messageDiv = progressItem?.querySelector(".instaraw-rpg-progress-item-message");
 
-							try {
-								// Update status to in-progress
-								if (progressItem) progressItem.classList.add("in-progress");
-								if (statusBadge) {
-									statusBadge.className = "instaraw-rpg-progress-item-status in-progress";
-									statusBadge.textContent = "⚡ Generating...";
-								}
-								if (progressBar) {
-									progressBar.style.width = "100%";
-									progressBar.classList.add("animating");
-								}
+							// Update status to in-progress
+							if (progressItem) progressItem.classList.add("in-progress");
+							if (statusBadge) {
+								statusBadge.className = "instaraw-rpg-progress-item-status in-progress";
+								statusBadge.textContent = "⚡ Generating...";
+							}
+							if (progressBar) {
+								progressBar.style.width = "100%";
+								progressBar.classList.add("animating");
+							}
 
-								console.log(`[RPG] 📝 [${i + 1}] Starting generation...`);
+							console.log(`[RPG] 📝 Generating prompt ${i + 1}/${generationCount}`);
+							console.log(`[RPG] 🚀 About to make API request...`);
 
-								// Build payload
-								const payload = {
-									source_prompts: sourcePrompts.map((p) => ({
-										id: p.source_id,
-										prompt: { positive: p.positive_prompt, negative: p.negative_prompt },
-									})),
-									generation_count: 1,
-									inspiration_count: inspirationCount,
-									is_sdxl: isSDXL,
-									character_reference: useCharacter ? characterDescription : "",
-									model: model,
-									gemini_api_key: geminiApiKey,
-									grok_api_key: grokApiKey,
-									system_prompt: systemPrompt,
-									temperature: temperatureValue,
-									top_p: topPValue,
-									force_regenerate: forceRegenerate,
-									mode: detectedMode,
-									affect_elements: affectElements,
-									user_input: userInput,
-									generation_style: node.properties.generation_style || "reality"
-								};
+							// Build payload for single prompt generation
+							const payload = {
+								source_prompts: sourcePrompts.map((p) => ({
+									id: p.source_id,
+									prompt: {
+										positive: p.positive_prompt,
+										negative: p.negative_prompt,
+									},
+								})),
+								generation_count: 1, // SEQUENTIAL: Generate 1 at a time
+								inspiration_count: inspirationCount,
+								is_sdxl: isSDXL,
+								character_reference: useCharacter ? characterDescription : "",
+								model: model,
+								gemini_api_key: geminiApiKey,
+								grok_api_key: grokApiKey,
+								system_prompt: systemPrompt,
+								temperature: temperatureValue,
+								top_p: topPValue,
+								force_regenerate: forceRegenerate,
+								mode: detectedMode,
+								affect_elements: affectElements,
+								user_input: userInput,
+								generation_style: node.properties.generation_style || "reality"
+							};
 
-								// Retry logic
-								const maxRetries = 3;
-								let retryCount = 0;
-								let success = false;
-								let promptResult = null;
+							// Retry logic with exponential backoff
+							const maxRetries = 3;
+							let retryCount = 0;
+							let success = false;
+							let promptResult = null;
+							let lastError = null;
 
-								while (retryCount <= maxRetries && !success && !cancelRequested) {
-									try {
-										if (retryCount > 0) {
-											if (statusBadge) statusBadge.textContent = `🔄 Retry ${retryCount}/${maxRetries}`;
-											if (messageDiv) messageDiv.textContent = `Rate limited, retrying in ${Math.pow(2, retryCount - 1)}s...`;
-											await new Promise(resolve => setTimeout(resolve, Math.pow(2, retryCount - 1) * 1000));
-											if (cancelRequested) break;
+							while (retryCount <= maxRetries && !success && !cancelRequested) {
+								try {
+									if (retryCount > 0) {
+										if (statusBadge) {
+											statusBadge.className = "instaraw-rpg-progress-item-status retrying";
+											statusBadge.textContent = `🔄 Retry ${retryCount}/${maxRetries}`;
 										}
-
-										const response = await api.fetchApi("/instaraw/generate_creative_prompts", {
-											method: "POST",
-											headers: { "Content-Type": "application/json" },
-											body: JSON.stringify(payload),
-											signal: signal
-										});
-
-										const result = await parseJSONResponse(response);
-
-										if (response.status === 429 || (result.error && /rate.*limit/i.test(result.error))) {
-											throw new Error("Rate limited");
+										if (messageDiv) {
+											messageDiv.textContent = `Rate limited, retrying in ${Math.pow(2, retryCount - 1)}s...`;
+											messageDiv.className = "instaraw-rpg-progress-item-message";
 										}
+										console.log(`[RPG] ⏳ Retry ${retryCount}/${maxRetries} - waiting ${Math.pow(2, retryCount - 1)}s`);
 
-										if (!response.ok) {
-											throw new Error(result?.error || `API error ${response.status}`);
-										}
+										// Exponential backoff: 1s, 2s, 4s, 8s
+										await new Promise(resolve => setTimeout(resolve, Math.pow(2, retryCount - 1) * 1000));
 
-										if (result.success && result.prompts && result.prompts.length > 0) {
-											const rawPrompt = result.prompts[0];
+										if (cancelRequested) break;
+									}
 
-											// Parse response (handle multiple formats)
-											const parseStructuredPrompt = (text) => {
-												const lines = text.split('\\n').map(l => l.trim()).filter(l => l);
-												const parsed = {
-													positive: "",
-													negative: "",
-													tags: [],
-													classification: { content_type: "other", safety_level: "sfw", shot_type: "other" }
-												};
-												lines.forEach(line => {
-													if (line.startsWith('POSITIVE:')) parsed.positive = line.substring(9).trim();
-													else if (line.startsWith('NEGATIVE:')) parsed.negative = line.substring(9).trim();
-													else if (line.startsWith('CONTENT_TYPE:')) parsed.classification.content_type = line.substring(13).trim().toLowerCase();
-													else if (line.startsWith('SAFETY_LEVEL:')) parsed.classification.safety_level = line.substring(13).trim().toLowerCase();
-													else if (line.startsWith('SHOT_TYPE:')) parsed.classification.shot_type = line.substring(10).trim().toLowerCase();
-													else if (line.startsWith('TAGS:')) parsed.tags = line.substring(5).trim().split(',').map(t => t.trim()).filter(t => t);
-												});
-												if (!parsed.positive && text) parsed.positive = text;
-												return parsed;
+									// Make API request
+									const response = await api.fetchApi("/instaraw/generate_creative_prompts", {
+										method: "POST",
+										headers: { "Content-Type": "application/json" },
+										body: JSON.stringify(payload),
+										signal: signal
+									});
+
+									const result = await parseJSONResponse(response);
+									console.log(`[RPG] 🔍 API Response for prompt ${i + 1}:`, {
+										status: response.status,
+										ok: response.ok,
+										resultSuccess: result?.success,
+										promptsCount: result?.prompts?.length,
+										error: result?.error
+									});
+
+									// Check for rate limiting (429 or error message contains "rate limit")
+									if (response.status === 429 || (result.error && /rate.*limit/i.test(result.error))) {
+										throw new Error("Rate limited");
+									}
+
+									if (!response.ok) {
+										throw new Error(result?.error || `API error ${response.status}`);
+									}
+
+									if (result.success && result.prompts && result.prompts.length > 0) {
+										const rawPrompt = result.prompts[0];
+										console.log(`[RPG] 📄 Raw response from API:`, rawPrompt);
+
+										const parseStructuredPrompt = (text) => {
+											const lines = text.split('\n').map(l => l.trim()).filter(l => l);
+											const parsed = {
+												positive: "",
+												negative: "",
+												tags: [],
+												classification: {
+													content_type: "other",
+													safety_level: "sfw",
+													shot_type: "other"
+												}
 											};
 
-											if (typeof rawPrompt === 'string') {
-												promptResult = parseStructuredPrompt(rawPrompt);
-											} else if (rawPrompt.prompt) {
-												promptResult = parseStructuredPrompt(rawPrompt.prompt);
-											} else if (rawPrompt.POSITIVE) {
-												promptResult = {
-													positive: rawPrompt.POSITIVE || "",
-													negative: rawPrompt.NEGATIVE || "",
-													tags: typeof rawPrompt.TAGS === 'string' ? rawPrompt.TAGS.split(',').map(t => t.trim()).filter(t => t) : (rawPrompt.TAGS || []),
-													classification: {
-														content_type: (rawPrompt.CONTENT_TYPE || "other").toLowerCase(),
-														safety_level: (rawPrompt.SAFETY_LEVEL || "sfw").toLowerCase(),
-														shot_type: (rawPrompt.SHOT_TYPE || "other").toLowerCase()
-													}
-												};
-											} else {
-												promptResult = rawPrompt;
+											lines.forEach(line => {
+												if (line.startsWith('POSITIVE:')) {
+													parsed.positive = line.substring(9).trim();
+												} else if (line.startsWith('NEGATIVE:')) {
+													parsed.negative = line.substring(9).trim();
+												} else if (line.startsWith('CONTENT_TYPE:')) {
+													parsed.classification.content_type = line.substring(13).trim().toLowerCase();
+												} else if (line.startsWith('SAFETY_LEVEL:')) {
+													parsed.classification.safety_level = line.substring(13).trim().toLowerCase();
+												} else if (line.startsWith('SHOT_TYPE:')) {
+													parsed.classification.shot_type = line.substring(10).trim().toLowerCase();
+												} else if (line.startsWith('TAGS:')) {
+													const tagsStr = line.substring(5).trim();
+													parsed.tags = tagsStr.split(',').map(t => t.trim()).filter(t => t);
+												}
+											});
+
+											if (!parsed.positive && text) {
+												parsed.positive = text;
 											}
 
-											success = true;
+											return parsed;
+										};
+
+										// Handle different response formats
+										if (typeof rawPrompt === 'string') {
+											// Format 1: Plain string with line-based format
+											promptResult = parseStructuredPrompt(rawPrompt);
+											console.log(`[RPG] ✅ Prompt ${i + 1} parsed from string format`);
+										} else if (rawPrompt.prompt) {
+											// Format 2: Object with 'prompt' field containing structured text
+											promptResult = parseStructuredPrompt(rawPrompt.prompt);
+											console.log(`[RPG] ✅ Prompt ${i + 1} parsed from prompt field`);
+										} else if (rawPrompt.POSITIVE) {
+											// Format 3: Object with uppercase keys
+											promptResult = {
+												positive: rawPrompt.POSITIVE || "",
+												negative: rawPrompt.NEGATIVE || "",
+												tags: typeof rawPrompt.TAGS === 'string' ? rawPrompt.TAGS.split(',').map(t => t.trim()).filter(t => t) : (rawPrompt.TAGS || []),
+												classification: {
+													content_type: (rawPrompt.CONTENT_TYPE || "other").toLowerCase(),
+													safety_level: (rawPrompt.SAFETY_LEVEL || "sfw").toLowerCase(),
+													shot_type: (rawPrompt.SHOT_TYPE || "other").toLowerCase()
+												}
+											};
+											console.log(`[RPG] ✅ Prompt ${i + 1} parsed from uppercase object`);
 										} else {
-											throw new Error(result.error || "No prompts returned");
+											// Format 4: Legacy object with lowercase keys
+											promptResult = rawPrompt;
+											console.log(`[RPG] ✅ Prompt ${i + 1} using legacy format`);
 										}
-									} catch (error) {
-										if (error.name === 'AbortError' || cancelRequested) break;
-										if (error.message.includes("Rate limited") || error.message.includes("429")) {
-											retryCount++;
-											if (retryCount > maxRetries) throw new Error("Max retries exceeded");
-										} else {
-											throw error;
+
+										console.log(`[RPG] 📦 Prompt ${i + 1} final:`, {
+											positiveLength: promptResult.positive?.length || 0,
+											positivePreview: promptResult.positive?.slice(0, 80) + "...",
+											negativeLength: promptResult.negative?.length || 0,
+											tagsCount: promptResult.tags?.length || 0,
+											classification: promptResult.classification
+										});
+										success = true;
+									} else {
+										console.error(`[RPG] ❌ Invalid result for prompt ${i + 1}:`, result);
+										throw new Error(result.error || "No prompts returned");
+									}
+
+								} catch (error) {
+									lastError = error;
+
+									// Check if it's an abort error
+									if (error.name === 'AbortError' || cancelRequested) {
+										console.log(`[RPG] ⏹ Request aborted for prompt ${i + 1}`);
+										break;
+									}
+
+									// Check if it's a rate limit error
+									if (error.message.includes("Rate limited") || error.message.includes("429")) {
+										console.log(`[RPG] ⚠️ Rate limited on prompt ${i + 1}, attempt ${retryCount + 1}/${maxRetries + 1}`);
+										retryCount++;
+
+										if (retryCount > maxRetries) {
+											console.error(`[RPG] ❌ Max retries exceeded for prompt ${i + 1}`);
+											throw new Error("Rate limit exceeded - max retries reached");
 										}
+									} else {
+										// Other error - don't retry
+										console.error(`[RPG] ❌ Error generating prompt ${i + 1}:`, error);
+										throw error;
 									}
 								}
+							}
 
-								if (cancelRequested || !success) {
-									throw new Error(cancelRequested ? "Cancelled" : "Failed after retries");
+							if (cancelRequested) {
+								// Mark as cancelled
+								if (progressItem) {
+									progressItem.classList.remove("in-progress");
+									progressItem.classList.add("error");
 								}
+								if (statusBadge) {
+									statusBadge.className = "instaraw-rpg-progress-item-status error";
+									statusBadge.textContent = "⏹ Cancelled";
+								}
+								if (progressBar) {
+									progressBar.classList.remove("animating");
+									progressBar.style.width = "0%";
+								}
+								if (messageDiv) {
+									messageDiv.textContent = "Generation cancelled by user";
+									messageDiv.className = "instaraw-rpg-progress-item-message";
+								}
+								break;
+							}
 
-								// Save to database
-								const savedPrompt = await addGeneratedPrompt({
-									positive: promptResult.positive,
-									negative: promptResult.negative,
-									tags: promptResult.tags || [],
-									classification: promptResult.classification || { content_type: "other", safety_level: "sfw", shot_type: "other" }
+							if (success && promptResult) {
+								// Success!
+								console.log(`[RPG] 💾 Saving prompt ${i + 1} to database:`, {
+									positive: promptResult.positive?.slice(0, 50) + '...',
+									positiveLength: promptResult.positive?.length || 0,
+									negative: promptResult.negative?.slice(0, 50) + '...',
+									negativeLength: promptResult.negative?.length || 0,
+									tags: promptResult.tags,
+									classification: promptResult.classification
 								});
+								allGeneratedPrompts.push(promptResult);
+							// Save to database immediately with full data
+							const savedPrompt = await addGeneratedPrompt({
+								positive: promptResult.positive,
+								negative: promptResult.negative,
+								tags: promptResult.tags || [],
+								classification: promptResult.classification || { content_type: "other", safety_level: "sfw", shot_type: "other" }
+							});
+							console.log(`[RPG] ✅ Saved prompt ${i + 1} with ID:`, savedPrompt.id);
 
-								console.log(`[RPG] ✅ [${i + 1}] Saved with ID: ${savedPrompt.id}`);
-
-								// Update UI - success
 								if (progressItem) {
 									progressItem.classList.remove("in-progress");
 									progressItem.classList.add("success");
@@ -2844,51 +2948,26 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 									messageDiv.textContent = preview + (promptResult.positive?.length > 80 ? "..." : "");
 									messageDiv.className = "instaraw-rpg-progress-item-message";
 								}
-
-								return { status: 'success', index: i, prompt: promptResult };
-
-							} catch (error) {
-								console.error(`[RPG] ❌ [${i + 1}] Error:`, error.message);
-
-								// Update UI - error
+							} else {
+								// Failed after retries
 								if (progressItem) {
 									progressItem.classList.remove("in-progress");
 									progressItem.classList.add("error");
 								}
 								if (statusBadge) {
 									statusBadge.className = "instaraw-rpg-progress-item-status error";
-									statusBadge.textContent = error.message.includes("Cancelled") ? "⏹ Cancelled" : "✖ Failed";
+									statusBadge.textContent = "✖ Failed";
 								}
 								if (progressBar) {
 									progressBar.classList.remove("animating");
 									progressBar.style.width = "0%";
 								}
 								if (messageDiv) {
-									messageDiv.textContent = error.message || "Generation failed";
+									messageDiv.textContent = lastError?.message || "Generation failed";
 									messageDiv.className = "instaraw-rpg-progress-item-message error";
 								}
-
-								return { status: 'error', index: i, error };
 							}
-						};
-
-						// Launch all prompts in parallel with 222ms stagger
-						console.log(`[RPG] 🚀 Launching ${generationCount} parallel requests (222ms stagger)...`);
-						const promises = [];
-						for (let i = 0; i < generationCount; i++) {
-							if (i > 0) {
-								await new Promise(resolve => setTimeout(resolve, 222));
-							}
-							promises.push(generateSinglePrompt(i));
 						}
-
-						// Wait for all to complete
-						const results = await Promise.allSettled(promises);
-						const successResults = results.filter(r => r.status === 'fulfilled' && r.value.status === 'success');
-						successResults.forEach(r => allGeneratedPrompts.push(r.value.prompt));
-
-						console.log(`[RPG] ✅ Parallel generation complete: ${successResults.length}/${generationCount} succeeded`);
-
 
 						// Show results
 						if (allGeneratedPrompts.length > 0) {
