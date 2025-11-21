@@ -208,6 +208,16 @@ app.registerExtension({
 					});
 				};
 
+				// Periodic height sync to handle dynamic content changes (2222ms - enough without interference)
+				let heightSyncInterval = setInterval(() => {
+					if (node && container && container.offsetHeight > 0) {
+						updateCachedHeight();
+					} else {
+						// Node removed, clear interval
+						clearInterval(heightSyncInterval);
+					}
+				}, 2222);
+
 				// === State Sync (Exact AIL Pattern) ===
 				const syncPromptBatchWidget = () => {
 					const promptQueueWidget = node.widgets?.find((w) => w.name === "prompt_queue_data");
@@ -457,6 +467,8 @@ app.registerExtension({
 					if (!textarea) return;
 					textarea.style.height = "auto";
 					textarea.style.height = `${textarea.scrollHeight}px`;
+					// Trigger height sync after resize
+					setTimeout(() => updateCachedHeight(), 50);
 				};
 
 				const parseJSONResponse = async (response) => {
@@ -1344,7 +1356,7 @@ app.registerExtension({
 									<details class="instaraw-rpg-advanced-settings" style="margin-top: 12px; padding: 12px; background: #1f2937; border: 1px solid #4b5563; border-radius: 4px;">
 										<summary style="cursor: pointer; font-weight: 500; font-size: 12px; color: #9ca3af; user-select: none;">⚙️ Advanced: Edit System Prompt</summary>
 										<div style="margin-top: 12px;">
-											<textarea class="instaraw-rpg-character-system-prompt instaraw-rpg-prompt-textarea" style="font-family: monospace; font-size: 11px; line-height: 1.5; min-height: 80px; resize: vertical; width: 100%;">${escapeHtml(node.properties.character_system_prompt || getCharacterSystemPrompt(node.properties.character_complexity || "balanced"))}</textarea>
+											<textarea class="instaraw-rpg-character-system-prompt instaraw-rpg-prompt-textarea" style="font-family: monospace; font-size: 11px; line-height: 1.5; resize: vertical; width: 100%; overflow-y: hidden;">${escapeHtml(node.properties.character_system_prompt || getCharacterSystemPrompt(node.properties.character_complexity || "balanced"))}</textarea>
 											<div style="display: flex; align-items: center; justify-content: space-between; margin-top: 8px;">
 												<div class="instaraw-rpg-hint-text" style="font-size: 10px; color: #9ca3af;">
 													💡 Custom edits override complexity setting
@@ -1421,29 +1433,20 @@ app.registerExtension({
 											});
 
 											return `
-												<div style="background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.2); border-radius: 4px; padding: 10px; margin-bottom: 8px;">
-													<div style="display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center;">
-														<div style="font-size: 11px; color: #c7d2fe; line-height: 1.4;">
-															💡 AI randomly selects prompts, learns their vocabulary & style, generates new prompts that seamlessly match
-														</div>
-														<div style="text-align: right; white-space: nowrap;">
-															<div style="font-size: 10px; color: #9ca3af; margin-bottom: 2px;">Available prompts</div>
-															<div style="display: flex; align-items: center; gap: 6px; justify-content: flex-end;">
-																<span style="font-weight: 600; font-size: 12px; color: ${hasActiveFilters ? '#818cf8' : '#e5e7eb'};">
-																	${filteredCount.toLocaleString()}${hasActiveFilters ? ` / ${totalCount.toLocaleString()}` : ''}
-																</span>
-																${hasActiveFilters ? `<span style="font-size: 9px; color: #818cf8; background: rgba(129, 140, 248, 0.15); padding: 2px 6px; border-radius: 3px;">✓ Filtered</span>` : ''}
-																<button class="instaraw-rpg-btn-text instaraw-rpg-open-library-tab-btn" style="font-size: 10px; padding: 2px 6px; opacity: 0.8;" title="Open Library tab to adjust filters">
-																	⚙️
-																</button>
-															</div>
-														</div>
+												<div style="background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.2); border-radius: 6px; padding: 10px;">
+													<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
+														<span style="font-size: 11px; color: #d1d5db;">Learn from</span>
+														<input type="number" class="instaraw-rpg-number-input instaraw-rpg-inspiration-count" value="${node.properties.inspiration_count || 3}" min="0" max="10" style="width: 45px; height: 24px; padding: 2px 6px; font-size: 12px; text-align: center;" />
+														<span style="font-size: 11px; color: #d1d5db;">prompts per generation</span>
 													</div>
-												</div>
-												<div style="display: flex; align-items: center; gap: 8px;">
-													<span style="font-size: 12px; color: #9ca3af; white-space: nowrap;">Learn from</span>
-													<input type="number" class="instaraw-rpg-number-input instaraw-rpg-inspiration-count" value="${node.properties.inspiration_count || 3}" min="0" max="10" style="width: 60px; height: 28px; padding: 4px 8px; font-size: 13px;" />
-													<span style="font-size: 12px; color: #9ca3af;">random prompts</span>
+													<div style="display: flex; align-items: center; justify-content: space-between;">
+														<span style="font-size: 11px; color: #9ca3af;">
+															Pool: <strong style="color: #e5e7eb; font-weight: 500;">${filteredCount.toLocaleString()}</strong> ${hasActiveFilters ? '<span style="color: #818cf8;">prompts (filtered)</span>' : 'prompts'}
+														</span>
+														<button class="instaraw-rpg-btn-text instaraw-rpg-open-library-tab-btn" style="font-size: 10px; padding: 3px 6px; opacity: 0.8; display: flex; align-items: center; gap: 4px;" title="Switch to Library tab to adjust filters">
+															<span style="color: #9ca3af;">Filters</span> ⚙️
+														</button>
+													</div>
 												</div>
 											`;
 										})()}
@@ -1467,7 +1470,7 @@ app.registerExtension({
 							<details class="instaraw-rpg-advanced-settings" style="margin-top: 12px; padding: 12px; background: #1f2937; border: 1px solid #4b5563; border-radius: 4px;">
 								<summary style="cursor: pointer; font-weight: 500; font-size: 12px; color: #9ca3af; user-select: none;">⚙️ Advanced: Edit System Prompt</summary>
 								<div style="margin-top: 12px;">
-									<textarea class="instaraw-rpg-system-prompt instaraw-rpg-prompt-textarea" style="font-family: monospace; font-size: 11px; line-height: 1.5; min-height: 80px; resize: vertical; width: 100%;">${escapeHtml(node.properties.creative_system_prompt || DEFAULT_RPG_SYSTEM_PROMPT)}</textarea>
+									<textarea class="instaraw-rpg-system-prompt instaraw-rpg-prompt-textarea" style="font-family: monospace; font-size: 11px; line-height: 1.5; resize: vertical; width: 100%; overflow-y: hidden;">${escapeHtml(node.properties.creative_system_prompt || DEFAULT_RPG_SYSTEM_PROMPT)}</textarea>
 									<div style="display: flex; align-items: center; justify-content: space-between; margin-top: 8px;">
 										<div class="instaraw-rpg-hint-text" style="font-size: 10px; color: #9ca3af;">
 											💡 Controls how prompts are generated and formatted
@@ -3129,7 +3132,7 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 						}
 
 					} catch (error) {
-						console.error("[RPG] ❌ Error during sequential prompt generation:", error);
+						console.error("[RPG] ❌ Error during parallel prompt generation:", error);
 						console.error("[RPG] Error stack:", error.stack);
 
 						// Hide progress section, show error
@@ -3242,13 +3245,43 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 						};
 					}
 
+					// System prompt textarea (for Generate tab)
 					const systemPromptInput = container.querySelector(".instaraw-rpg-system-prompt");
 					if (systemPromptInput) {
+						// Auto-resize on load
+						autoResizeTextarea(systemPromptInput);
+
 						systemPromptInput.oninput = (e) => {
 							node.properties.creative_system_prompt = e.target.value;
+							autoResizeTextarea(e.target);
 							app.graph.setDirtyCanvas(true, true);
 						};
 					}
+
+					// Character system prompt textarea (for Character tab)
+					const characterSystemPromptInput = container.querySelector(".instaraw-rpg-character-system-prompt");
+					if (characterSystemPromptInput) {
+						// Auto-resize on load
+						autoResizeTextarea(characterSystemPromptInput);
+
+						characterSystemPromptInput.oninput = (e) => {
+							node.properties.character_system_prompt = e.target.value;
+							autoResizeTextarea(e.target);
+							app.graph.setDirtyCanvas(true, true);
+						};
+					}
+
+					// Handle details toggle (re-calculate textarea height when opened)
+					container.querySelectorAll(".instaraw-rpg-advanced-settings").forEach((details) => {
+						details.addEventListener('toggle', () => {
+							if (details.open) {
+								const textarea = details.querySelector('textarea');
+								if (textarea) {
+									setTimeout(() => autoResizeTextarea(textarea), 10);
+								}
+							}
+						});
+					});
 
 					// Reload database button
 					const reloadDBBtn = container.querySelector(".instaraw-rpg-reload-db-btn");
@@ -3912,17 +3945,6 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 								autoResizeTextarea(systemPromptTextarea);
 							}
 
-							app.graph.setDirtyCanvas(true, true);
-						};
-					}
-
-					// Character system prompt textarea (advanced)
-					const characterSystemPromptInput = container.querySelector(".instaraw-rpg-character-system-prompt");
-					if (characterSystemPromptInput) {
-						autoResizeTextarea(characterSystemPromptInput);
-						characterSystemPromptInput.oninput = (e) => autoResizeTextarea(characterSystemPromptInput);
-						characterSystemPromptInput.onchange = (e) => {
-							node.properties.character_system_prompt = e.target.value;
 							app.graph.setDirtyCanvas(true, true);
 						};
 					}
