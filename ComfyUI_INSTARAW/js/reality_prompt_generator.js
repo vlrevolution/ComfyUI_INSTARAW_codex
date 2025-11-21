@@ -7,7 +7,24 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
-const DEFAULT_RPG_SYSTEM_PROMPT = "You are an expert AI prompt engineer specializing in INSTARAW workflows.";
+const DEFAULT_RPG_SYSTEM_PROMPT = `You are an expert AI prompt engineer specializing in photorealistic image generation.
+
+Generate complete, detailed prompts in the following EXACT format (each field on a new line with prefix):
+
+POSITIVE: [Highly detailed positive prompt with camera settings, lighting, composition, subject details, environment, mood, technical quality descriptors]
+NEGATIVE: [Negative prompt listing unwanted elements: low quality, blurry, distorted, artifacts, bad anatomy, etc.]
+CONTENT_TYPE: [person|landscape|architecture|object|animal|abstract|other]
+SAFETY_LEVEL: [sfw|suggestive|nsfw]
+SHOT_TYPE: [portrait|full_body|close_up|wide_angle|other]
+TAGS: [SDXL-style comma-separated tags, MAX 50 words, most important tags only]
+
+CRITICAL RULES:
+- POSITIVE: 150-300 words, photorealistic, include camera/lens details, lighting, composition
+- NEGATIVE: Common quality issues and artifacts to avoid
+- TAGS: Maximum 50 words (≈250 chars), prioritize most visually important descriptors
+- Use EXACT prefixes above (POSITIVE:, NEGATIVE:, etc.)
+- Keep each field on ONE line (no line breaks within fields)
+- Be specific, detailed, and technical for best image quality`;
 const REMOTE_PROMPTS_DB_URL = "https://instara.s3.us-east-1.amazonaws.com/prompts.db.json";
 const CREATIVE_MODEL_OPTIONS = [
 	{ value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
@@ -302,6 +319,7 @@ app.registerExtension({
 							promptsDatabase = cachedDB.data;
 							// Load user prompts and merge
 							await loadUserPrompts();
+							await loadGeneratedPrompts();
 							mergeUserPromptsWithLibrary();
 							isDatabaseLoading = false;
 							renderUI();
@@ -510,6 +528,40 @@ app.registerExtension({
 					}
 					return false;
 				};
+
+			// === Generated Prompts Storage ===
+			let generatedPrompts = [];
+			const loadGeneratedPrompts = async () => {
+				try {
+					const cached = await getFromIndexedDB("generated_prompts");
+					generatedPrompts = cached || [];
+					console.log(`[RPG] Loaded ${generatedPrompts.length} generated prompts`);
+					return generatedPrompts;
+				} catch (e) { generatedPrompts = []; return []; }
+			};
+			const saveGeneratedPrompts = async (prompts) => {
+				try {
+					await saveToIndexedDB("generated_prompts", prompts);
+					generatedPrompts = prompts;
+					return true;
+				} catch (e) { return false; }
+			};
+			const addGeneratedPrompt = async (data) => {
+				const p = {
+					id: `gen_${Date.now()}_${Math.random().toString(36).substr(2,9)}`,
+					tags: data.tags || [],
+					prompt: { positive: data.positive || "", negative: data.negative || "" },
+					classification: data.classification || { content_type: "other", safety_level: "sfw", shot_type: "other" },
+					is_ai_generated: true,
+					created_at: Date.now()
+				};
+				generatedPrompts.unshift(p);
+				await saveGeneratedPrompts(generatedPrompts);
+				promptsDatabase = promptsDatabase.filter(x => !x.is_ai_generated);
+				const userCount = promptsDatabase.filter(x => x.is_user_created).length;
+				promptsDatabase.splice(userCount, 0, ...generatedPrompts);
+				return p;
+			};
 
 				const exportUserPrompts = () => {
 					const bookmarks = JSON.parse(node.properties.bookmarks || "[]");
@@ -794,6 +846,7 @@ app.registerExtension({
 										<option value="all" ${filters.prompt_source === "all" || !filters.prompt_source ? "selected" : ""}>📚 All Prompts</option>
 										<option value="library" ${filters.prompt_source === "library" ? "selected" : ""}>📚 Library Only</option>
 										<option value="user" ${filters.prompt_source === "user" ? "selected" : ""}>✏️ My Prompts</option>
+										<option value="generated" ${filters.prompt_source === "generated" ? "selected" : ""}>✨ Generated</option>
 									</select>
 									<label class="instaraw-rpg-checkbox-label" title="Show only bookmarked prompts">
 										<input type="checkbox" class="instaraw-rpg-show-bookmarked-checkbox" ${filters.show_bookmarked ? "checked" : ""} />
@@ -1683,8 +1736,10 @@ app.registerExtension({
 					if (filters.prompt_source && filters.prompt_source !== "all") {
 						if (filters.prompt_source === "user") {
 							filtered = filtered.filter((p) => p.is_user_created === true);
-						} else if (filters.prompt_source === "library") {
-							filtered = filtered.filter((p) => !p.is_user_created);
+						} else if (filters.prompt_source === "generated") {
+						filtered = filtered.filter((p) => p.is_ai_generated === true);
+					} else if (filters.prompt_source === "library") {
+							filtered = filtered.filter((p) => !p.is_user_created && !p.is_ai_generated);
 						}
 					}
 
@@ -2535,9 +2590,15 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 					// Get model and settings
 					const modelWidget = node.widgets?.find((w) => w.name === "creative_model");
 					const model = modelWidget?.value || node.properties.creative_model || "gemini-2.5-pro";
-					const systemPrompt = node.properties.creative_system_prompt || DEFAULT_RPG_SYSTEM_PROMPT;
+
+					// FORCE USE NEW SYSTEM PROMPT - reset old cached value
+					node.properties.creative_system_prompt = DEFAULT_RPG_SYSTEM_PROMPT;
+					const systemPrompt = DEFAULT_RPG_SYSTEM_PROMPT;
+
 					const temperatureValue = parseFloat(node.properties.creative_temperature ?? 0.9) || 0.9;
 					const topPValue = parseFloat(node.properties.creative_top_p ?? 0.9) || 0.9;
+
+					console.log(`[RPG] 🔧 Using system prompt (${systemPrompt.length} chars):`, systemPrompt.slice(0, 150) + "...");
 
 					console.log("[RPG] Configuration:", {
 						mode: detectedMode,
@@ -2601,6 +2662,8 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 							`;
 							progressItems.appendChild(progressItem);
 						}
+						// Resize node to fit progress UI
+						updateCachedHeight();
 					}
 
 					// Collect all generated prompts
@@ -2614,8 +2677,10 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 					});
 
 					try {
-						// Sequential generation: Loop through each prompt
-						for (let i = 0; i < generationCount; i++) {
+						// PARALLEL generation with 222ms stagger
+						console.log(`[RPG] 🚀 Launching ${generationCount} parallel requests with 222ms stagger...`);
+
+						const generateSinglePrompt = async (index) => {
 							// Check if cancelled
 							if (cancelRequested) {
 								console.log(`[RPG] ⏹ Generation cancelled at prompt ${i + 1}/${generationCount}`);
@@ -2634,11 +2699,12 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 								statusBadge.textContent = "⚡ Generating...";
 							}
 							if (progressBar) {
-								progressBar.style.width = "30%";
+								progressBar.style.width = "100%";
 								progressBar.classList.add("animating");
 							}
 
 							console.log(`[RPG] 📝 Generating prompt ${i + 1}/${generationCount}`);
+							console.log(`[RPG] 🚀 About to make API request...`);
 
 							// Build payload for single prompt generation
 							const payload = {
@@ -2675,9 +2741,6 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 
 							while (retryCount <= maxRetries && !success && !cancelRequested) {
 								try {
-									// Update progress
-									if (progressBar) progressBar.style.width = "60%";
-
 									if (retryCount > 0) {
 										if (statusBadge) {
 											statusBadge.className = "instaraw-rpg-progress-item-status retrying";
@@ -2704,6 +2767,13 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 									});
 
 									const result = await parseJSONResponse(response);
+									console.log(`[RPG] 🔍 API Response for prompt ${i + 1}:`, {
+										status: response.status,
+										ok: response.ok,
+										resultSuccess: result?.success,
+										promptsCount: result?.prompts?.length,
+										error: result?.error
+									});
 
 									// Check for rate limiting (429 or error message contains "rate limit")
 									if (response.status === 429 || (result.error && /rate.*limit/i.test(result.error))) {
@@ -2715,10 +2785,67 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 									}
 
 									if (result.success && result.prompts && result.prompts.length > 0) {
-										promptResult = result.prompts[0]; // Get the first (and only) prompt
+										const rawPrompt = result.prompts[0];
+										console.log(`[RPG] 📄 Raw response from API:`, rawPrompt);
+
+										// Parse line-based format with prefixes
+										if (typeof rawPrompt === 'string') {
+											const parseStructuredPrompt = (text) => {
+												const lines = text.split('\n').map(l => l.trim()).filter(l => l);
+												const parsed = {
+													positive: "",
+													negative: "",
+													tags: [],
+													classification: {
+														content_type: "other",
+														safety_level: "sfw",
+														shot_type: "other"
+													}
+												};
+
+												lines.forEach(line => {
+													if (line.startsWith('POSITIVE:')) {
+														parsed.positive = line.substring(9).trim();
+													} else if (line.startsWith('NEGATIVE:')) {
+														parsed.negative = line.substring(9).trim();
+													} else if (line.startsWith('CONTENT_TYPE:')) {
+														parsed.classification.content_type = line.substring(13).trim().toLowerCase();
+													} else if (line.startsWith('SAFETY_LEVEL:')) {
+														parsed.classification.safety_level = line.substring(13).trim().toLowerCase();
+													} else if (line.startsWith('SHOT_TYPE:')) {
+														parsed.classification.shot_type = line.substring(10).trim().toLowerCase();
+													} else if (line.startsWith('TAGS:')) {
+														const tagsStr = line.substring(5).trim();
+														parsed.tags = tagsStr.split(',').map(t => t.trim()).filter(t => t);
+													}
+												});
+
+												// Fallback: if no POSITIVE field found, use entire text as positive
+												if (!parsed.positive && text) {
+													parsed.positive = text;
+												}
+
+												return parsed;
+											};
+
+											promptResult = parseStructuredPrompt(rawPrompt);
+											console.log(`[RPG] ✅ Prompt ${i + 1} parsed from structured format`);
+										} else {
+											// API returned an object (legacy format)
+											promptResult = rawPrompt;
+											console.log(`[RPG] ✅ Prompt ${i + 1} received as object`);
+										}
+
+										console.log(`[RPG] 📦 Prompt ${i + 1} final:`, {
+											positiveLength: promptResult.positive?.length || 0,
+											positivePreview: promptResult.positive?.slice(0, 80) + "...",
+											negativeLength: promptResult.negative?.length || 0,
+											tagsCount: promptResult.tags?.length || 0,
+											classification: promptResult.classification
+										});
 										success = true;
-										console.log(`[RPG] ✅ Prompt ${i + 1} generated successfully`);
 									} else {
+										console.error(`[RPG] ❌ Invalid result for prompt ${i + 1}:`, result);
 										throw new Error(result.error || "No prompts returned");
 									}
 
@@ -2771,7 +2898,23 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 
 							if (success && promptResult) {
 								// Success!
+								console.log(`[RPG] 💾 Saving prompt ${i + 1} to database:`, {
+									positive: promptResult.positive?.slice(0, 50) + '...',
+									positiveLength: promptResult.positive?.length || 0,
+									negative: promptResult.negative?.slice(0, 50) + '...',
+									negativeLength: promptResult.negative?.length || 0,
+									tags: promptResult.tags,
+									classification: promptResult.classification
+								});
 								allGeneratedPrompts.push(promptResult);
+							// Save to database immediately with full data
+							const savedPrompt = await addGeneratedPrompt({
+								positive: promptResult.positive,
+								negative: promptResult.negative,
+								tags: promptResult.tags || [],
+								classification: promptResult.classification || { content_type: "other", safety_level: "sfw", shot_type: "other" }
+							});
+							console.log(`[RPG] ✅ Saved prompt ${i + 1} with ID:`, savedPrompt.id);
 
 								if (progressItem) {
 									progressItem.classList.remove("in-progress");

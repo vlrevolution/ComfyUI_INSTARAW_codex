@@ -1829,7 +1829,11 @@
 }
 
 .instaraw-rpg-progress-item-fill.animating {
-	animation: instaraw-rpg-progress-shimmer 2s linear infinite;
+	background: linear-gradient(90deg, #c4b5fd, #818cf8, #c4b5fd);
+	background-size: 200% 100%;
+	animation: instaraw-rpg-progress-shimmer 1.5s linear infinite;
+	border-radius: 3px;
+	box-shadow: 0 0 8px rgba(167, 139, 250, 0.6);
 }
 
 .instaraw-rpg-progress-item-message {
@@ -1849,9 +1853,8 @@
 }
 
 @keyframes instaraw-rpg-progress-shimmer {
-	0% { filter: brightness(1); }
-	50% { filter: brightness(1.2); }
-	100% { filter: brightness(1); }
+	0% { background-position: 200% 0; }
+	100% { background-position: -200% 0; }
 }
 
 .instaraw-rpg-generate-preview {
@@ -1993,4 +1996,239 @@
 	border: 1px solid rgba(255, 255, 255, 0.2);
 	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
 	z-index: 10;
+}
+
+/* === Generation Modal === */
+.instaraw-rpg-generation-modal-overlay {
+	position: fixed;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	background: rgba(0, 0, 0, 0.8);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 10000;
+	padding: 20px;
+}
+
+.instaraw-rpg-generation-modal {
+	background: #0d0f12;
+	border: 1px solid rgba(255, 255, 255, 0.12);
+	border-radius: 8px;
+	padding: 24px;
+	max-width: 600px;
+	width: 100%;
+	max-height: 80vh;
+	overflow-y: auto;
+	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+}
+
+.instaraw-rpg-generation-modal-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	margin-bottom: 20px;
+	padding-bottom: 16px;
+	border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.instaraw-rpg-generation-modal-title {
+	font-size: 18px;
+	font-weight: 600;
+	color: #f9fafb;
+	margin: 0;
+}
+
+.instaraw-rpg-generation-modal-close {
+	background: none;
+	border: none;
+	color: rgba(249, 250, 251, 0.6);
+	font-size: 24px;
+	cursor: pointer;
+	padding: 0;
+	width: 32px;
+	height: 32px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 4px;
+	transition: all 0.2s;
+}
+
+.instaraw-rpg-generation-modal-close:hover {
+	background: rgba(255, 255, 255, 0.08);
+	color: #f9fafb;
+}
+
+.instaraw-rpg-generation-modal-overall {
+	margin-bottom: 20px;
+	padding: 16px;
+	background: rgba(255, 255, 255, 0.03);
+	border-radius: 6px;
+	border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.instaraw-rpg-generation-modal-overall-text {
+	font-size: 14px;
+	color: rgba(249, 250, 251, 0.8);
+	margin-bottom: 8px;
+}
+
+.instaraw-rpg-generation-modal-overall-bar {
+	width: 100%;
+	height: 8px;
+	background: rgba(255, 255, 255, 0.08);
+	border-radius: 4px;
+	overflow: hidden;
+}
+
+.instaraw-rpg-generation-modal-overall-fill {
+	height: 100%;
+	background: linear-gradient(90deg, #8b5cf6, #a78bfa);
+	transition: width 0.3s ease;
+	border-radius: 4px;
+}
+
+.instaraw-rpg-generation-modal-list {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.instaraw-rpg-generation-item {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 12px;
+	background: rgba(255, 255, 255, 0.03);
+	border-radius: 6px;
+	border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.instaraw-rpg-generation-item-index {
+	font-size: 14px;
+	font-weight: 600;
+	color: rgba(249, 250, 251, 0.6);
+	min-width: 40px;
+}
+
+.instaraw-rpg-generation-item-status {
+	flex: 1;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.instaraw-rpg-generation-item-icon {
+	font-size: 16px;
+	line-height: 1;
+}
+
+.instaraw-rpg-generation-item-text {
+	font-size: 13px;
+	color: rgba(249, 250, 251, 0.8);
+}
+
+.instaraw-rpg-generation-item.status-pending {
+	border-color: rgba(156, 163, 175, 0.3);
+}
+
+.instaraw-rpg-generation-item.status-pending .instaraw-rpg-generation-item-icon {
+	color: #9ca3af;
+}
+
+.instaraw-rpg-generation-item.status-generating {
+	border-color: rgba(139, 92, 246, 0.5);
+	background: rgba(139, 92, 246, 0.08);
+}
+
+.instaraw-rpg-generation-item.status-generating .instaraw-rpg-generation-item-icon {
+	color: #a78bfa;
+	animation: spin 1s linear infinite;
+}
+
+.instaraw-rpg-generation-item.status-success {
+	border-color: rgba(34, 197, 94, 0.5);
+	background: rgba(34, 197, 94, 0.08);
+}
+
+.instaraw-rpg-generation-item.status-success .instaraw-rpg-generation-item-icon {
+	color: #22c55e;
+}
+
+.instaraw-rpg-generation-item.status-throttled {
+	border-color: rgba(251, 191, 36, 0.5);
+	background: rgba(251, 191, 36, 0.08);
+}
+
+.instaraw-rpg-generation-item.status-throttled .instaraw-rpg-generation-item-icon {
+	color: #fbbf24;
+}
+
+.instaraw-rpg-generation-item.status-error {
+	border-color: rgba(239, 68, 68, 0.5);
+	background: rgba(239, 68, 68, 0.08);
+}
+
+.instaraw-rpg-generation-item.status-error .instaraw-rpg-generation-item-icon {
+	color: #ef4444;
+}
+
+@keyframes spin {
+	from {
+		transform: rotate(0deg);
+	}
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+.instaraw-rpg-generation-modal-footer {
+	margin-top: 20px;
+	padding-top: 16px;
+	border-top: 1px solid rgba(255, 255, 255, 0.08);
+	display: flex;
+	justify-content: flex-end;
+	gap: 12px;
+}
+
+.instaraw-rpg-generation-modal-btn {
+	padding: 8px 16px;
+	border-radius: 4px;
+	font-size: 13px;
+	font-weight: 500;
+	cursor: pointer;
+	transition: all 0.2s;
+	border: none;
+}
+
+.instaraw-rpg-generation-modal-btn-primary {
+	background: #8b5cf6;
+	color: white;
+}
+
+.instaraw-rpg-generation-modal-btn-primary:hover:not(:disabled) {
+	background: #7c3aed;
+}
+
+.instaraw-rpg-generation-modal-btn-primary:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.instaraw-rpg-generation-modal-btn-secondary {
+	background: rgba(255, 255, 255, 0.08);
+	color: rgba(249, 250, 251, 0.9);
+}
+
+.instaraw-rpg-generation-modal-btn-secondary:hover {
+	background: rgba(255, 255, 255, 0.12);
+}
+
+/* Generated prompts badge */
+.instaraw-rpg-source-badge.generated {
+	background: rgba(139, 92, 246, 0.2);
+	color: #a78bfa;
 }
