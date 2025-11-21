@@ -59,6 +59,9 @@ app.registerExtension({
 				if (this.properties.creative_top_p === undefined) {
 					this.properties.creative_top_p = 0.9;
 				}
+				if (this.properties.generation_style === undefined) {
+					this.properties.generation_style = "reality"; // Default to reality mode
+				}
 
 				const node = this;
 				let cachedHeight = 400; // Initial height (AIL pattern)
@@ -85,6 +88,15 @@ app.registerExtension({
 				const itemsPerPage = 6;
 				let reorderModeEnabled = false;
 				let sdxlModeEnabled = false;
+
+				// Random mode state
+				let showingRandomPrompts = false;
+				let randomPrompts = [];
+				let randomCount = 6;
+
+				// User prompt edit mode state
+				const editingPrompts = new Set(); // Track which prompt IDs are in edit mode
+				const editingValues = {}; // Store temporary edit values
 
 				// Container setup (exact AIL pattern)
 				const container = document.createElement("div");
@@ -288,6 +300,9 @@ app.registerExtension({
 						const cachedDB = await getFromIndexedDB("prompts_db_cache");
 						if (cachedDB && cachedDB.version === "1.0") {
 							promptsDatabase = cachedDB.data;
+							// Load user prompts and merge
+							await loadUserPrompts();
+							mergeUserPromptsWithLibrary();
 							isDatabaseLoading = false;
 							renderUI();
 							return;
@@ -330,6 +345,10 @@ app.registerExtension({
 							version: "1.0",
 							data: promptsDatabase,
 						});
+
+						// Load user prompts and merge
+						await loadUserPrompts();
+						mergeUserPromptsWithLibrary();
 
 						isDatabaseLoading = false;
 						databaseLoadProgress = 100;
@@ -410,6 +429,155 @@ app.registerExtension({
 						};
 						request.onerror = () => resolve(false);
 					});
+				};
+
+				// === User Prompts Management ===
+				let userPrompts = []; // In-memory cache of user-created prompts
+
+				const loadUserPrompts = async () => {
+					try {
+						const cached = await getFromIndexedDB("user_prompts");
+						userPrompts = cached || [];
+						console.log(`[RPG] Loaded ${userPrompts.length} user prompts from IndexedDB`);
+						return userPrompts;
+					} catch (error) {
+						console.error("[RPG] Error loading user prompts:", error);
+						userPrompts = [];
+						return [];
+					}
+				};
+
+				const saveUserPrompts = async (prompts) => {
+					try {
+						await saveToIndexedDB("user_prompts", prompts);
+						userPrompts = prompts;
+						console.log(`[RPG] Saved ${prompts.length} user prompts to IndexedDB`);
+						return true;
+					} catch (error) {
+						console.error("[RPG] Error saving user prompts:", error);
+						return false;
+					}
+				};
+
+				const addUserPrompt = async (promptData) => {
+					const newPrompt = {
+						id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+						tags: promptData.tags || [],
+						prompt: {
+							positive: promptData.positive || "",
+							negative: promptData.negative || ""
+						},
+						classification: {
+							content_type: promptData.content_type || "person",
+							safety_level: promptData.safety_level || "sfw",
+							shot_type: promptData.shot_type || "portrait"
+						},
+						is_user_created: true, // Flag to identify user prompts
+						created_at: Date.now()
+					};
+
+					userPrompts.unshift(newPrompt); // Add to beginning
+					await saveUserPrompts(userPrompts);
+					mergeUserPromptsWithLibrary();
+					renderUI();
+					return newPrompt;
+				};
+
+				const updateUserPrompt = async (id, updates) => {
+					const index = userPrompts.findIndex(p => p.id === id);
+					if (index !== -1) {
+						userPrompts[index] = {
+							...userPrompts[index],
+							...updates,
+							is_user_created: true, // Preserve flag
+							updated_at: Date.now()
+						};
+						await saveUserPrompts(userPrompts);
+						mergeUserPromptsWithLibrary();
+						renderUI();
+						return true;
+					}
+					return false;
+				};
+
+				const deleteUserPrompt = async (id) => {
+					const filtered = userPrompts.filter(p => p.id !== id);
+					if (filtered.length !== userPrompts.length) {
+						await saveUserPrompts(filtered);
+						mergeUserPromptsWithLibrary();
+						renderUI();
+						return true;
+					}
+					return false;
+				};
+
+				const exportUserPrompts = () => {
+					const exportData = {
+						version: "1.0",
+						exported_at: new Date().toISOString(),
+						prompts: userPrompts
+					};
+					const dataStr = JSON.stringify(exportData, null, 2);
+					const blob = new Blob([dataStr], { type: "application/json" });
+					const url = URL.createObjectURL(blob);
+					const a = document.createElement("a");
+					a.href = url;
+					a.download = `rpg_user_prompts_${Date.now()}.json`;
+					document.body.appendChild(a);
+					a.click();
+					document.body.removeChild(a);
+					URL.revokeObjectURL(url);
+					console.log(`[RPG] Exported ${userPrompts.length} user prompts`);
+				};
+
+				const importUserPrompts = async (file) => {
+					return new Promise((resolve, reject) => {
+						const reader = new FileReader();
+						reader.onload = async (e) => {
+							try {
+								const data = JSON.parse(e.target.result);
+								const imported = data.prompts || [];
+
+								// Validate format
+								if (!Array.isArray(imported)) {
+									throw new Error("Invalid format: prompts must be an array");
+								}
+
+								// Merge with existing (avoid duplicates by ID)
+								const existingIds = new Set(userPrompts.map(p => p.id));
+								let added = 0;
+								imported.forEach(prompt => {
+									if (!existingIds.has(prompt.id)) {
+										userPrompts.push({
+											...prompt,
+											is_user_created: true,
+											imported_at: Date.now()
+										});
+										added++;
+									}
+								});
+
+								await saveUserPrompts(userPrompts);
+								mergeUserPromptsWithLibrary();
+								renderUI();
+								console.log(`[RPG] Imported ${added} new user prompts (${imported.length - added} duplicates skipped)`);
+								resolve({ added, skipped: imported.length - added });
+							} catch (error) {
+								console.error("[RPG] Error importing user prompts:", error);
+								reject(error);
+							}
+						};
+						reader.onerror = reject;
+						reader.readAsText(file);
+					});
+				};
+
+				const mergeUserPromptsWithLibrary = () => {
+					// Remove old user prompts from promptsDatabase
+					promptsDatabase = promptsDatabase.filter(p => !p.is_user_created);
+					// Add current user prompts to the beginning
+					promptsDatabase = [...userPrompts, ...promptsDatabase];
+					console.log(`[RPG] Merged database: ${userPrompts.length} user + ${promptsDatabase.length - userPrompts.length} library = ${promptsDatabase.length} total`);
 				};
 
 				// === Main Render Function ===
@@ -570,24 +738,37 @@ app.registerExtension({
 					const promptQueue = parsePromptBatch();
 					const batchSourceIds = new Set(promptQueue.map(p => p.source_id).filter(Boolean));
 
-					// Apply filters
-					let filteredPrompts = filterPrompts(promptsDatabase, filters);
+					// Determine which prompts to show
+					let filteredPrompts;
+					let pagePrompts;
+					let totalPages;
 
-					// Pagination
-					const totalPages = Math.ceil(filteredPrompts.length / itemsPerPage);
-					const startIdx = currentPage * itemsPerPage;
-					const endIdx = startIdx + itemsPerPage;
-					const pagePrompts = filteredPrompts.slice(startIdx, endIdx);
+					if (showingRandomPrompts && randomPrompts.length > 0) {
+						// Random mode: show the fetched random prompts
+						filteredPrompts = randomPrompts;
+						pagePrompts = randomPrompts; // Show all random prompts (no pagination)
+						totalPages = 1;
+					} else {
+						// Normal mode: apply filters
+						filteredPrompts = filterPrompts(promptsDatabase, filters);
+
+						// Pagination
+						totalPages = Math.ceil(filteredPrompts.length / itemsPerPage);
+						const startIdx = currentPage * itemsPerPage;
+						const endIdx = startIdx + itemsPerPage;
+						pagePrompts = filteredPrompts.slice(startIdx, endIdx);
+					}
 
 					return `
 						<div class="instaraw-rpg-library">
 							<div class="instaraw-rpg-filters">
-								<input type="text" class="instaraw-rpg-search-input" placeholder="🔍 Search prompts..." value="${filters.search_query || ""}" />
+								<input type="text" class="instaraw-rpg-search-input" placeholder="🔍 Search by prompt, tags, or ID..." value="${filters.search_query || ""}" />
 								<div class="instaraw-rpg-filter-row">
 									<select class="instaraw-rpg-filter-dropdown" data-filter="content_type">
 										<option value="any">All Content Types</option>
 										<option value="person" ${filters.content_type === "person" ? "selected" : ""}>Person</option>
 										<option value="object" ${filters.content_type === "object" ? "selected" : ""}>Object</option>
+										<option value="other" ${filters.content_type === "other" ? "selected" : ""}>Other</option>
 									</select>
 									<select class="instaraw-rpg-filter-dropdown" data-filter="safety_level">
 										<option value="any">All Safety Levels</option>
@@ -599,6 +780,12 @@ app.registerExtension({
 										<option value="any">All Shot Types</option>
 										<option value="portrait" ${filters.shot_type === "portrait" ? "selected" : ""}>Portrait</option>
 										<option value="full_body" ${filters.shot_type === "full_body" ? "selected" : ""}>Full Body</option>
+										<option value="other" ${filters.shot_type === "other" ? "selected" : ""}>Other</option>
+									</select>
+									<select class="instaraw-rpg-filter-dropdown" data-filter="prompt_source">
+										<option value="all" ${filters.prompt_source === "all" || !filters.prompt_source ? "selected" : ""}>📚 All Prompts</option>
+										<option value="library" ${filters.prompt_source === "library" ? "selected" : ""}>📚 Library Only</option>
+										<option value="user" ${filters.prompt_source === "user" ? "selected" : ""}>✏️ My Prompts</option>
 									</select>
 									<label class="instaraw-rpg-checkbox-label" title="Show only bookmarked prompts">
 										<input type="checkbox" class="instaraw-rpg-show-bookmarked-checkbox" ${filters.show_bookmarked ? "checked" : ""} />
@@ -609,16 +796,48 @@ app.registerExtension({
 							</div>
 
 							<div class="instaraw-rpg-library-header">
-								<div style="display: flex; align-items: center; gap: 12px;">
+								<div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
 									<span class="instaraw-rpg-result-count">
-										${filteredPrompts.length} prompt${filteredPrompts.length === 1 ? '' : 's'} found
-										${filters.show_bookmarked ? ' (favorites only)' : ''}
-										${totalPages > 1 ? ` • Page ${currentPage + 1} of ${totalPages}` : ''}
+										${showingRandomPrompts
+											? `🎲 Showing ${randomPrompts.length} random prompt${randomPrompts.length === 1 ? '' : 's'}`
+											: `${filteredPrompts.length} prompt${filteredPrompts.length === 1 ? '' : 's'} found${filters.show_bookmarked ? ' (favorites only)' : ''}${totalPages > 1 ? ` • Page ${currentPage + 1} of ${totalPages}` : ''}`
+										}
 									</span>
 									<label class="instaraw-rpg-sdxl-toggle" title="SDXL mode - show tags as main content">
 										<input type="checkbox" class="instaraw-rpg-sdxl-mode-checkbox" ${filters.sdxl_mode ? "checked" : ""} />
 										🎨 SDXL
 									</label>
+									<div style="display: flex; align-items: center; gap: 6px; margin-left: auto;">
+										${showingRandomPrompts ? `
+											<!-- Random Mode: Show Add All, Reroll, and Exit buttons -->
+											<button class="instaraw-rpg-btn-primary instaraw-rpg-add-all-random-btn" style="font-size: 12px; padding: 6px 12px;">
+												✓ Add All ${randomPrompts.length} to Batch
+											</button>
+											<button class="instaraw-rpg-btn-secondary instaraw-rpg-reroll-random-btn" style="font-size: 12px; padding: 6px 12px;" title="Get different random prompts">
+												🎲 Reroll
+											</button>
+											<button class="instaraw-rpg-btn-secondary instaraw-rpg-exit-random-btn" style="font-size: 12px; padding: 6px 12px;">
+												← Back to Library
+											</button>
+										` : `
+											<!-- Normal Mode: Show Create/Import/Export and Random controls -->
+											<button class="instaraw-rpg-btn-secondary instaraw-rpg-create-prompt-btn" style="font-size: 12px; padding: 6px 12px;" title="Create new custom prompt">
+												➕ Create
+											</button>
+											<button class="instaraw-rpg-btn-secondary instaraw-rpg-import-prompts-btn" style="font-size: 12px; padding: 6px 12px;" title="Import prompts from JSON file">
+												📂 Import
+											</button>
+											<button class="instaraw-rpg-btn-secondary instaraw-rpg-export-prompts-btn" style="font-size: 12px; padding: 6px 12px;" title="Export my prompts to JSON file" ${userPrompts.length === 0 ? 'disabled' : ''}>
+												💾 Export (${userPrompts.length})
+											</button>
+											<div style="width: 1px; height: 20px; background: #4b5563; margin: 0 4px;"></div>
+											<label style="font-size: 11px; color: #9ca3af; margin-right: 4px;">Random:</label>
+											<input type="number" class="instaraw-rpg-random-count-input" value="${randomCount}" min="1" max="50" style="width: 50px; padding: 4px 6px; border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(255, 255, 255, 0.05); color: #f9fafb; border-radius: 4px; font-size: 12px;" title="How many random prompts to show (uses current filters)" />
+											<button class="instaraw-rpg-btn-secondary instaraw-rpg-show-random-btn" style="font-size: 12px; padding: 6px 12px;">
+												🎲 Show Random
+											</button>
+										`}
+									</div>
 								</div>
 							</div>
 
@@ -667,12 +886,13 @@ app.registerExtension({
 														const sdxlMode = filters.sdxl_mode || false;
 														const matchType = prompt._matchType;
 														const matchBadge = matchType === 'both' ? '📝🏷️' : matchType === 'prompt' ? '📝' : matchType === 'tags' ? '🏷️' : '';
+														const sourceBadge = prompt.is_user_created ? '✏️ My Prompt' : '📚 Library';
 
 														const allTags = prompt.tags || [];
 														const autoExpand = matchType === 'tags' || matchType === 'both'; // Auto-expand if tags match
 
 														return `
-									<div class="instaraw-rpg-library-card ${batchCount > 0 ? 'in-batch' : ''}" data-id="${prompt.id}">
+									<div class="instaraw-rpg-library-card ${batchCount > 0 ? 'in-batch' : ''} ${prompt.is_user_created ? 'user-prompt' : ''}" data-id="${prompt.id}" data-is-user="${prompt.is_user_created ? 'true' : 'false'}">
 										<div class="instaraw-rpg-library-card-header">
 											<button class="instaraw-rpg-bookmark-btn ${bookmarks.includes(prompt.id) ? "bookmarked" : ""}" data-id="${prompt.id}">
 												${bookmarks.includes(prompt.id) ? "⭐" : "☆"}
@@ -680,12 +900,94 @@ app.registerExtension({
 											<div class="instaraw-rpg-batch-controls">
 												<button class="instaraw-rpg-add-to-batch-btn" data-id="${prompt.id}">+ Add</button>
 												${batchCount > 0 ? `<button class="instaraw-rpg-undo-batch-btn" data-id="${prompt.id}">↶ ${batchCount}</button>` : ''}
+												${prompt.is_user_created ? `<button class="instaraw-rpg-delete-user-prompt-btn" data-id="${prompt.id}" title="Delete this prompt">🗑️</button>` : ''}
 											</div>
 										</div>
 										<div class="instaraw-rpg-library-card-content">
-											${matchBadge ? `<div class="instaraw-rpg-match-badge">${matchBadge} Match</div>` : ''}
+											<div style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; align-items: center;">
+												<div class="instaraw-rpg-source-badge ${prompt.is_user_created ? 'user' : 'library'}">${sourceBadge}</div>
+												${matchBadge ? `<div class="instaraw-rpg-match-badge">${matchBadge} Match</div>` : ''}
+												<div class="instaraw-rpg-id-badge-container">
+													<span class="instaraw-rpg-id-badge" title="Prompt ID: ${prompt.id}">ID: ${prompt.id.substring(0, 8)}..</span>
+													<button class="instaraw-rpg-id-copy-btn" data-id="${prompt.id}" title="Copy full ID">📄</button>
+												</div>
+											</div>
 
-											${sdxlMode ? `
+											${prompt.is_user_created ? `
+												<!-- User Created Prompt -->
+												${editingPrompts.has(prompt.id) ? `
+													<!-- EDIT MODE: Show textareas with Save/Cancel -->
+													<div style="display: flex; flex-direction: column; gap: 8px;">
+														<div>
+															<label style="font-size: 11px; font-weight: 500; color: rgba(249, 250, 251, 0.7); text-transform: uppercase; display: block; margin-bottom: 4px;">Positive Prompt</label>
+															<textarea class="instaraw-rpg-prompt-textarea instaraw-rpg-user-prompt-edit-positive" data-id="${prompt.id}">${escapeHtml(editingValues[prompt.id]?.positive ?? positive)}</textarea>
+														</div>
+														<div>
+															<label style="font-size: 11px; font-weight: 500; color: rgba(249, 250, 251, 0.7); text-transform: uppercase; display: block; margin-bottom: 4px;">Negative Prompt</label>
+															<textarea class="instaraw-rpg-prompt-textarea instaraw-rpg-user-prompt-edit-negative" data-id="${prompt.id}">${escapeHtml(editingValues[prompt.id]?.negative ?? negative)}</textarea>
+														</div>
+														<div>
+															<label style="font-size: 11px; font-weight: 500; color: rgba(249, 250, 251, 0.7); text-transform: uppercase; display: block; margin-bottom: 4px;">Tags (comma-separated)</label>
+															<input type="text" class="instaraw-rpg-prompt-textarea instaraw-rpg-user-prompt-edit-tags" data-id="${prompt.id}" value="${editingValues[prompt.id]?.tags ?? allTags.join(", ")}" placeholder="tag1, tag2, tag3..." style="resize: none; min-height: auto; height: auto;" />
+														</div>
+
+														<!-- Classification Fields -->
+														<div style="display: flex; flex-direction: column; gap: 8px; margin-top: 4px;">
+															<div>
+																<label style="font-size: 11px; font-weight: 500; color: rgba(249, 250, 251, 0.7); text-transform: uppercase; display: block; margin-bottom: 4px;">Content Type</label>
+																<select class="instaraw-rpg-filter-dropdown instaraw-rpg-user-prompt-edit-content-type" data-id="${prompt.id}" style="width: 100%; padding: 6px 8px;">
+																	<option value="person" ${(editingValues[prompt.id]?.content_type ?? prompt.classification?.content_type ?? 'person') === 'person' ? 'selected' : ''}>Person</option>
+																	<option value="object" ${(editingValues[prompt.id]?.content_type ?? prompt.classification?.content_type ?? 'person') === 'object' ? 'selected' : ''}>Object</option>
+																	<option value="other" ${(editingValues[prompt.id]?.content_type ?? prompt.classification?.content_type ?? 'person') === 'other' ? 'selected' : ''}>Other</option>
+																</select>
+															</div>
+															<div>
+																<label style="font-size: 11px; font-weight: 500; color: rgba(249, 250, 251, 0.7); text-transform: uppercase; display: block; margin-bottom: 4px;">Safety Level</label>
+																<select class="instaraw-rpg-filter-dropdown instaraw-rpg-user-prompt-edit-safety-level" data-id="${prompt.id}" style="width: 100%; padding: 6px 8px;">
+																	<option value="sfw" ${(editingValues[prompt.id]?.safety_level ?? prompt.classification?.safety_level ?? 'sfw') === 'sfw' ? 'selected' : ''}>SFW</option>
+																	<option value="suggestive" ${(editingValues[prompt.id]?.safety_level ?? prompt.classification?.safety_level ?? 'sfw') === 'suggestive' ? 'selected' : ''}>Suggestive</option>
+																	<option value="nsfw" ${(editingValues[prompt.id]?.safety_level ?? prompt.classification?.safety_level ?? 'sfw') === 'nsfw' ? 'selected' : ''}>NSFW</option>
+																</select>
+															</div>
+															<div>
+																<label style="font-size: 11px; font-weight: 500; color: rgba(249, 250, 251, 0.7); text-transform: uppercase; display: block; margin-bottom: 4px;">Shot Type</label>
+																<select class="instaraw-rpg-filter-dropdown instaraw-rpg-user-prompt-edit-shot-type" data-id="${prompt.id}" style="width: 100%; padding: 6px 8px;">
+																	<option value="portrait" ${(editingValues[prompt.id]?.shot_type ?? prompt.classification?.shot_type ?? 'portrait') === 'portrait' ? 'selected' : ''}>Portrait</option>
+																	<option value="full_body" ${(editingValues[prompt.id]?.shot_type ?? prompt.classification?.shot_type ?? 'portrait') === 'full_body' ? 'selected' : ''}>Full Body</option>
+																	<option value="other" ${(editingValues[prompt.id]?.shot_type ?? prompt.classification?.shot_type ?? 'portrait') === 'other' ? 'selected' : ''}>Other</option>
+																</select>
+															</div>
+														</div>
+
+														<div style="display: flex; gap: 6px; margin-top: 4px;">
+															<button class="instaraw-rpg-btn-primary instaraw-rpg-save-user-prompt-btn" data-id="${prompt.id}" style="font-size: 11px; padding: 6px 12px; flex: 1;">
+																💾 Save
+															</button>
+															<button class="instaraw-rpg-btn-secondary instaraw-rpg-cancel-edit-prompt-btn" data-id="${prompt.id}" style="font-size: 11px; padding: 6px 12px; flex: 1;">
+																✖ Cancel
+															</button>
+														</div>
+													</div>
+												` : sdxlMode ? `
+													<!-- VIEW MODE (SDXL): Show tags as comma-separated text -->
+													<div class="instaraw-rpg-prompt-preview">
+														${allTags.map((tag) => highlightSearchTerm(tag, searchQuery)).join(", ")}
+													</div>
+													<button class="instaraw-rpg-btn-secondary instaraw-rpg-edit-user-prompt-btn" data-id="${prompt.id}" style="font-size: 11px; padding: 4px 10px; margin-top: 8px; width: 100%;">
+														✏️ Edit Prompt
+													</button>
+												` : `
+													<!-- VIEW MODE (Normal): Show prompt with tags -->
+													<div class="instaraw-rpg-prompt-preview ${!positive ? 'instaraw-rpg-error-text' : ''}">${highlightSearchTerm(displayText, searchQuery)}</div>
+													${negative ? `<div class="instaraw-rpg-prompt-preview" style="font-size: 11px; color: #9ca3af; margin-top: 4px;"><strong>Negative:</strong> ${highlightSearchTerm(negative, searchQuery)}</div>` : ''}
+													<div class="instaraw-rpg-library-card-tags" style="margin-top: 8px;">
+														${allTags.map((tag) => `<span class="instaraw-rpg-tag">${highlightSearchTerm(tag, searchQuery)}</span>`).join("")}
+													</div>
+													<button class="instaraw-rpg-btn-secondary instaraw-rpg-edit-user-prompt-btn" data-id="${prompt.id}" style="font-size: 11px; padding: 4px 10px; margin-top: 8px; width: 100%;">
+														✏️ Edit Prompt
+													</button>
+												`}
+											` : sdxlMode ? `
 												<!-- SDXL Mode: Show tags as comma-separated text -->
 												<div class="instaraw-rpg-prompt-preview">
 													${allTags.map((tag) => highlightSearchTerm(tag, searchQuery)).join(", ")}
@@ -941,6 +1243,21 @@ app.registerExtension({
 								<span class="instaraw-rpg-hint-text">Detected from ${node._linkedAILNodeId ? `AIL #${node._linkedAILNodeId}` : 'workflow'}</span>
 							</div>
 
+							<!-- Reality vs Creative Mode -->
+							<div class="instaraw-rpg-generation-mode-selector" style="margin: 12px 0;">
+								<label class="instaraw-rpg-section-label" style="margin-bottom: 8px; display: block;">Generation Mode</label>
+								<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+									<button class="instaraw-rpg-mode-toggle-btn ${node.properties.generation_style !== 'creative' ? 'active' : ''}" data-mode="reality" style="padding: 12px; border: 2px solid ${node.properties.generation_style !== 'creative' ? '#60a5fa' : '#4b5563'}; background: ${node.properties.generation_style !== 'creative' ? 'rgba(59, 130, 246, 0.1)' : 'transparent'}; border-radius: 6px; cursor: pointer; transition: all 0.2s;">
+										<div style="font-weight: 600; font-size: 13px; color: ${node.properties.generation_style !== 'creative' ? '#60a5fa' : '#e5e7eb'};">🎯 Reality Mode</div>
+										<div style="font-size: 11px; color: #9ca3af; margin-top: 4px;">Strict adherence to library prompts</div>
+									</button>
+									<button class="instaraw-rpg-mode-toggle-btn ${node.properties.generation_style === 'creative' ? 'active' : ''}" data-mode="creative" style="padding: 12px; border: 2px solid ${node.properties.generation_style === 'creative' ? '#8b5cf6' : '#4b5563'}; background: ${node.properties.generation_style === 'creative' ? 'rgba(139, 92, 246, 0.1)' : 'transparent'}; border-radius: 6px; cursor: pointer; transition: all 0.2s;">
+										<div style="font-weight: 600; font-size: 13px; color: ${node.properties.generation_style === 'creative' ? '#8b5cf6' : '#e5e7eb'};">✨ Creative Mode</div>
+										<div style="font-size: 11px; color: #9ca3af; margin-top: 4px;">Inspired by library prompts (flexible)</div>
+									</button>
+								</div>
+							</div>
+
 							<!-- img2img: Affect Elements -->
 							${detectedMode === 'img2img' ? `
 								<div class="instaraw-rpg-affect-elements">
@@ -995,6 +1312,15 @@ app.registerExtension({
 						<button class="instaraw-rpg-btn-primary instaraw-rpg-generate-unified-btn">
 							${detectedMode === 'img2img' ? '🖼️' : '🎨'} Generate Prompts
 						</button>
+
+						<!-- Progress Tracking Section -->
+						<div class="instaraw-rpg-generation-progress" style="display: none;">
+							<div class="instaraw-rpg-progress-header">
+								<h4>Generating Prompts...</h4>
+								<button class="instaraw-rpg-btn-secondary instaraw-rpg-cancel-generation-btn">⏹ Cancel Generation</button>
+							</div>
+							<div class="instaraw-rpg-progress-items"></div>
+						</div>
 
 						<!-- Preview Section -->
 						<div class="instaraw-rpg-generate-preview" style="display: none;">
@@ -1320,11 +1646,13 @@ app.registerExtension({
 						filtered = filtered.filter((p) => {
 							const positive = (p.prompt?.positive || "").toLowerCase();
 							const tags = (p.tags || []).join(" ").toLowerCase();
+							const id = (p.id || "").toLowerCase();
 							const matchInPrompt = positive.includes(query);
 							const matchInTags = tags.includes(query);
+							const matchInId = id.includes(query);
 							// Store match type for highlighting
-							p._matchType = matchInPrompt ? (matchInTags ? 'both' : 'prompt') : (matchInTags ? 'tags' : null);
-							return matchInPrompt || matchInTags;
+							p._matchType = matchInPrompt ? (matchInTags ? 'both' : 'prompt') : (matchInTags ? 'tags' : (matchInId ? 'id' : null));
+							return matchInPrompt || matchInTags || matchInId;
 						});
 					}
 
@@ -1341,6 +1669,15 @@ app.registerExtension({
 					// Shot type
 					if (filters.shot_type && filters.shot_type !== "any") {
 						filtered = filtered.filter((p) => p.classification?.shot_type === filters.shot_type);
+					}
+
+					// Prompt source (user vs library)
+					if (filters.prompt_source && filters.prompt_source !== "all") {
+						if (filters.prompt_source === "user") {
+							filtered = filtered.filter((p) => p.is_user_created === true);
+						} else if (filters.prompt_source === "library") {
+							filtered = filtered.filter((p) => !p.is_user_created);
+						}
 					}
 
 					// Bookmarked only
@@ -1370,7 +1707,33 @@ app.registerExtension({
 				};
 
 				const generateUniqueId = () => {
-					return `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+					// Generate ULID (Universally Unique Lexicographically Sortable Identifier)
+					// 26 characters: 10 char timestamp + 16 char randomness
+					const ENCODING = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"; // Crockford's Base32
+					const ENCODING_LEN = ENCODING.length;
+					const TIME_LEN = 10;
+					const RANDOM_LEN = 16;
+
+					const encodeTime = (now, len) => {
+						let str = "";
+						for (let i = len; i > 0; i--) {
+							const mod = now % ENCODING_LEN;
+							str = ENCODING.charAt(mod) + str;
+							now = (now - mod) / ENCODING_LEN;
+						}
+						return str;
+					};
+
+					const encodeRandom = (len) => {
+						let str = "";
+						for (let i = 0; i < len; i++) {
+							str += ENCODING.charAt(Math.floor(Math.random() * ENCODING_LEN));
+						}
+						return str;
+					};
+
+					const now = Date.now();
+					return encodeTime(now, TIME_LEN) + encodeRandom(RANDOM_LEN);
 				};
 
 				// === Add Prompt to Batch ===
@@ -2102,14 +2465,19 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 					}
 				};
 
-				// === Generate Unified Prompts (Main Generate Button) ===
+				// === Generate Unified Prompts (Main Generate Button) - SEQUENTIAL VERSION ===
+				let generationAbortController = null; // For cancel functionality
+
 				const generateUnifiedPrompts = async () => {
-					console.group("[RPG] 🎯 Generate Unified Prompts - START");
+					console.group("[RPG] 🎯 Generate Unified Prompts - START (Sequential)");
 					console.log("[RPG] Timestamp:", new Date().toISOString());
 
 					const generateBtn = container.querySelector(".instaraw-rpg-generate-unified-btn");
 					const genCountInput = container.querySelector(".instaraw-rpg-gen-count-input");
 					const isSDXLCheckbox = container.querySelector(".instaraw-rpg-is-sdxl-checkbox");
+					const progressSection = container.querySelector(".instaraw-rpg-generation-progress");
+					const progressItems = container.querySelector(".instaraw-rpg-progress-items");
+					const previewSection = container.querySelector(".instaraw-rpg-generate-preview");
 
 					// Character settings
 					const enableCharacterCheckbox = container.querySelector(".instaraw-rpg-enable-character-checkbox");
@@ -2188,101 +2556,338 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 						return;
 					}
 
-					// Disable button and show loading progress bar
+					// Initialize AbortController for cancellation
+					generationAbortController = new AbortController();
+					const signal = generationAbortController.signal;
+
+					// Disable generate button and show progress section
 					if (generateBtn) {
 						generateBtn.disabled = true;
-						const originalText = generateBtn.textContent;
-						generateBtn.style.position = 'relative';
-						generateBtn.style.overflow = 'hidden';
-						generateBtn.innerHTML = `
-							${originalText}
-							<div class="instaraw-rpg-progress-bar-loading"></div>
-						`;
+						generateBtn.style.opacity = "0.5";
 					}
 
+					if (previewSection) {
+						previewSection.style.display = "none";
+					}
+
+					if (progressSection) {
+						progressSection.style.display = "block";
+					}
+
+					// Create progress items
+					if (progressItems) {
+						progressItems.innerHTML = "";
+						for (let i = 0; i < generationCount; i++) {
+							const progressItem = document.createElement("div");
+							progressItem.className = "instaraw-rpg-progress-item";
+							progressItem.dataset.index = i;
+							progressItem.innerHTML = `
+								<div class="instaraw-rpg-progress-item-header">
+									<span class="instaraw-rpg-progress-item-label">Prompt ${i + 1}/${generationCount}</span>
+									<span class="instaraw-rpg-progress-item-status pending">⏳ Pending</span>
+								</div>
+								<div class="instaraw-rpg-progress-item-bar">
+									<div class="instaraw-rpg-progress-item-fill" style="width: 0%"></div>
+								</div>
+								<div class="instaraw-rpg-progress-item-message"></div>
+							`;
+							progressItems.appendChild(progressItem);
+						}
+					}
+
+					// Collect all generated prompts
+					const allGeneratedPrompts = [];
+					let cancelRequested = false;
+
+					// Listen for cancel signal
+					signal.addEventListener('abort', () => {
+						cancelRequested = true;
+						console.log("[RPG] 🛑 Cancel requested by user");
+					});
+
 					try {
-						// Build request payload
-						const payload = {
-							source_prompts: sourcePrompts.map((p) => ({
-								id: p.source_id,
-								prompt: {
-									positive: p.positive_prompt,
-									negative: p.negative_prompt,
-								},
-							})),
-							generation_count: generationCount,
-							inspiration_count: inspirationCount,
-							is_sdxl: isSDXL,
-							character_reference: useCharacter ? characterDescription : "",
-							model: model,
-							gemini_api_key: geminiApiKey,
-							grok_api_key: grokApiKey,
-							system_prompt: systemPrompt,
-							temperature: temperatureValue,
-							top_p: topPValue,
-							force_regenerate: forceRegenerate,
-							// Unified-specific fields
-							mode: detectedMode,
-							affect_elements: affectElements,
-							user_input: userInput
-						};
+						// Sequential generation: Loop through each prompt
+						for (let i = 0; i < generationCount; i++) {
+							// Check if cancelled
+							if (cancelRequested) {
+								console.log(`[RPG] ⏹ Generation cancelled at prompt ${i + 1}/${generationCount}`);
+								break;
+							}
 
-						console.log("[RPG] Making API request to /instaraw/generate_creative_prompts");
+							const progressItem = progressItems?.querySelector(`[data-index="${i}"]`);
+							const statusBadge = progressItem?.querySelector(".instaraw-rpg-progress-item-status");
+							const progressBar = progressItem?.querySelector(".instaraw-rpg-progress-item-fill");
+							const messageDiv = progressItem?.querySelector(".instaraw-rpg-progress-item-message");
 
-						const response = await api.fetchApi("/instaraw/generate_creative_prompts", {
-							method: "POST",
-							headers: { "Content-Type": "application/json" },
-							body: JSON.stringify(payload),
-						});
+							// Update status to in-progress
+							if (progressItem) progressItem.classList.add("in-progress");
+							if (statusBadge) {
+								statusBadge.className = "instaraw-rpg-progress-item-status in-progress";
+								statusBadge.textContent = "⚡ Generating...";
+							}
+							if (progressBar) {
+								progressBar.style.width = "30%";
+								progressBar.classList.add("animating");
+							}
 
-						console.log("[RPG] API response status:", response.status, response.statusText);
+							console.log(`[RPG] 📝 Generating prompt ${i + 1}/${generationCount}`);
 
-						const result = await parseJSONResponse(response);
-						console.log("[RPG] API response parsed:", result);
+							// Build payload for single prompt generation
+							const payload = {
+								source_prompts: sourcePrompts.map((p) => ({
+									id: p.source_id,
+									prompt: {
+										positive: p.positive_prompt,
+										negative: p.negative_prompt,
+									},
+								})),
+								generation_count: 1, // SEQUENTIAL: Generate 1 at a time
+								inspiration_count: inspirationCount,
+								is_sdxl: isSDXL,
+								character_reference: useCharacter ? characterDescription : "",
+								model: model,
+								gemini_api_key: geminiApiKey,
+								grok_api_key: grokApiKey,
+								system_prompt: systemPrompt,
+								temperature: temperatureValue,
+								top_p: topPValue,
+								force_regenerate: forceRegenerate,
+								mode: detectedMode,
+								affect_elements: affectElements,
+								user_input: userInput,
+								generation_style: node.properties.generation_style || "reality"
+							};
 
-						if (!response.ok) {
-							throw new Error(result?.error || `Creative API error ${response.status}`);
+							// Retry logic with exponential backoff
+							const maxRetries = 3;
+							let retryCount = 0;
+							let success = false;
+							let promptResult = null;
+							let lastError = null;
+
+							while (retryCount <= maxRetries && !success && !cancelRequested) {
+								try {
+									// Update progress
+									if (progressBar) progressBar.style.width = "60%";
+
+									if (retryCount > 0) {
+										if (statusBadge) {
+											statusBadge.className = "instaraw-rpg-progress-item-status retrying";
+											statusBadge.textContent = `🔄 Retry ${retryCount}/${maxRetries}`;
+										}
+										if (messageDiv) {
+											messageDiv.textContent = `Rate limited, retrying in ${Math.pow(2, retryCount - 1)}s...`;
+											messageDiv.className = "instaraw-rpg-progress-item-message";
+										}
+										console.log(`[RPG] ⏳ Retry ${retryCount}/${maxRetries} - waiting ${Math.pow(2, retryCount - 1)}s`);
+
+										// Exponential backoff: 1s, 2s, 4s, 8s
+										await new Promise(resolve => setTimeout(resolve, Math.pow(2, retryCount - 1) * 1000));
+
+										if (cancelRequested) break;
+									}
+
+									// Make API request
+									const response = await api.fetchApi("/instaraw/generate_creative_prompts", {
+										method: "POST",
+										headers: { "Content-Type": "application/json" },
+										body: JSON.stringify(payload),
+										signal: signal
+									});
+
+									const result = await parseJSONResponse(response);
+
+									// Check for rate limiting (429 or error message contains "rate limit")
+									if (response.status === 429 || (result.error && /rate.*limit/i.test(result.error))) {
+										throw new Error("Rate limited");
+									}
+
+									if (!response.ok) {
+										throw new Error(result?.error || `API error ${response.status}`);
+									}
+
+									if (result.success && result.prompts && result.prompts.length > 0) {
+										promptResult = result.prompts[0]; // Get the first (and only) prompt
+										success = true;
+										console.log(`[RPG] ✅ Prompt ${i + 1} generated successfully`);
+									} else {
+										throw new Error(result.error || "No prompts returned");
+									}
+
+								} catch (error) {
+									lastError = error;
+
+									// Check if it's an abort error
+									if (error.name === 'AbortError' || cancelRequested) {
+										console.log(`[RPG] ⏹ Request aborted for prompt ${i + 1}`);
+										break;
+									}
+
+									// Check if it's a rate limit error
+									if (error.message.includes("Rate limited") || error.message.includes("429")) {
+										console.log(`[RPG] ⚠️ Rate limited on prompt ${i + 1}, attempt ${retryCount + 1}/${maxRetries + 1}`);
+										retryCount++;
+
+										if (retryCount > maxRetries) {
+											console.error(`[RPG] ❌ Max retries exceeded for prompt ${i + 1}`);
+											throw new Error("Rate limit exceeded - max retries reached");
+										}
+									} else {
+										// Other error - don't retry
+										console.error(`[RPG] ❌ Error generating prompt ${i + 1}:`, error);
+										throw error;
+									}
+								}
+							}
+
+							if (cancelRequested) {
+								// Mark as cancelled
+								if (progressItem) {
+									progressItem.classList.remove("in-progress");
+									progressItem.classList.add("error");
+								}
+								if (statusBadge) {
+									statusBadge.className = "instaraw-rpg-progress-item-status error";
+									statusBadge.textContent = "⏹ Cancelled";
+								}
+								if (progressBar) {
+									progressBar.classList.remove("animating");
+									progressBar.style.width = "0%";
+								}
+								if (messageDiv) {
+									messageDiv.textContent = "Generation cancelled by user";
+									messageDiv.className = "instaraw-rpg-progress-item-message";
+								}
+								break;
+							}
+
+							if (success && promptResult) {
+								// Success!
+								allGeneratedPrompts.push(promptResult);
+
+								if (progressItem) {
+									progressItem.classList.remove("in-progress");
+									progressItem.classList.add("success");
+								}
+								if (statusBadge) {
+									statusBadge.className = "instaraw-rpg-progress-item-status success";
+									statusBadge.textContent = "✓ Complete";
+								}
+								if (progressBar) {
+									progressBar.classList.remove("animating");
+									progressBar.style.width = "100%";
+								}
+								if (messageDiv) {
+									const preview = promptResult.positive?.slice(0, 80) || "No content";
+									messageDiv.textContent = preview + (promptResult.positive?.length > 80 ? "..." : "");
+									messageDiv.className = "instaraw-rpg-progress-item-message";
+								}
+							} else {
+								// Failed after retries
+								if (progressItem) {
+									progressItem.classList.remove("in-progress");
+									progressItem.classList.add("error");
+								}
+								if (statusBadge) {
+									statusBadge.className = "instaraw-rpg-progress-item-status error";
+									statusBadge.textContent = "✖ Failed";
+								}
+								if (progressBar) {
+									progressBar.classList.remove("animating");
+									progressBar.style.width = "0%";
+								}
+								if (messageDiv) {
+									messageDiv.textContent = lastError?.message || "Generation failed";
+									messageDiv.className = "instaraw-rpg-progress-item-message error";
+								}
+							}
 						}
 
-						if (result.success && result.prompts) {
-							console.log(`[RPG] ✅ Success! Generated ${result.prompts.length} prompts`);
+						// Show results
+						if (allGeneratedPrompts.length > 0) {
+							console.log(`[RPG] ✅ Generated ${allGeneratedPrompts.length}/${generationCount} prompts successfully`);
 
-							// Show preview
-							const previewSection = container.querySelector(".instaraw-rpg-generate-preview");
+							// Update progress header with completion statistics
+							const progressHeader = progressSection?.querySelector(".instaraw-rpg-progress-header h4");
+							if (progressHeader) {
+								const successCount = allGeneratedPrompts.length;
+								const failedCount = generationCount - successCount;
+								progressHeader.innerHTML = `
+									✓ Generation Complete:
+									<span style="color: #22c55e">${successCount} succeeded</span>
+									${failedCount > 0 ? `<span style="color: #ef4444">, ${failedCount} failed</span>` : ''}
+								`;
+							}
+
+							// Hide cancel button
+							const cancelBtn = progressSection?.querySelector(".instaraw-rpg-cancel-generation-btn");
+							if (cancelBtn) cancelBtn.style.display = "none";
+
 							const previewList = container.querySelector(".instaraw-rpg-generate-preview-list");
-
 							if (previewSection && previewList) {
-								previewList.innerHTML = result.prompts
-									.map(
-										(p, idx) => `
-									<div class="instaraw-rpg-preview-item">
-										<strong>#${idx + 1}</strong>
-										<p>${escapeHtml(p.positive || "")}</p>
-									</div>
-								`
-									)
+								previewList.innerHTML = allGeneratedPrompts
+									.map((p, idx) => `
+										<div class="instaraw-rpg-preview-item">
+											<strong>#${idx + 1}</strong>
+											<p>${escapeHtml(p.positive || "")}</p>
+										</div>
+									`)
 									.join("");
 
+								// Show preview (keep progress visible for stats)
 								previewSection.style.display = "block";
+
 								// Store generated prompts temporarily
-								node._generatedUnifiedPrompts = result.prompts;
+								node._generatedUnifiedPrompts = allGeneratedPrompts;
 								setupEventHandlers();
+
+								// Auto-hide progress section after 3 seconds if all succeeded
+								if (allGeneratedPrompts.length === generationCount) {
+									setTimeout(() => {
+										if (progressSection) progressSection.style.display = "none";
+									}, 3000);
+								}
 							}
+						} else if (cancelRequested) {
+							console.log("[RPG] ⏹ Generation cancelled - no prompts generated");
+
+							// Update progress header
+							const progressHeader = progressSection?.querySelector(".instaraw-rpg-progress-header h4");
+							if (progressHeader) {
+								progressHeader.innerHTML = '<span style="color: #fbbf24">⏹ Generation Cancelled</span>';
+							}
+
+							// Hide cancel button
+							const cancelBtn = progressSection?.querySelector(".instaraw-rpg-cancel-generation-btn");
+							if (cancelBtn) cancelBtn.style.display = "none";
+
+							// Keep progress section visible to show cancellation status
 						} else {
-							throw new Error(result.error || "Unknown error");
+							throw new Error("No prompts were generated successfully");
 						}
+
 					} catch (error) {
-						console.error("[RPG] ❌ Error during unified prompt generation:", error);
+						console.error("[RPG] ❌ Error during sequential prompt generation:", error);
 						console.error("[RPG] Error stack:", error.stack);
+
+						// Hide progress section, show error
+						if (progressSection) progressSection.style.display = "none";
 						alert(`Generation error: ${error.message || error}`);
+
 					} finally {
+						// Re-enable generate button
 						if (generateBtn) {
 							generateBtn.disabled = false;
+							generateBtn.style.opacity = "1";
 							const detectedMode = node._linkedAILMode || "txt2img";
 							const emoji = detectedMode === 'img2img' ? '🖼️' : '🎨';
 							generateBtn.textContent = `${emoji} Generate Prompts`;
 						}
-						console.log("[RPG] Generate Unified Prompts - END");
+
+						// Clear abort controller
+						generationAbortController = null;
+
+						console.log("[RPG] Generate Unified Prompts - END (Sequential)");
 						console.groupEnd();
 					}
 				};
@@ -2419,6 +3024,322 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 						clearFiltersBtn.onclick = clearFilters;
 					}
 
+					// Random count input - save value
+					const randomCountInput = container.querySelector(".instaraw-rpg-random-count-input");
+					if (randomCountInput) {
+						randomCountInput.onchange = (e) => {
+							randomCount = parseInt(e.target.value) || 6;
+						};
+					}
+
+					// Show random prompts button
+					const showRandomBtn = container.querySelector(".instaraw-rpg-show-random-btn");
+					if (showRandomBtn) {
+						showRandomBtn.onclick = async () => {
+							const count = parseInt(randomCountInput?.value) || randomCount;
+							const filters = JSON.parse(node.properties.library_filters || "{}");
+
+							// Disable button and show loading state
+							showRandomBtn.disabled = true;
+							const originalText = showRandomBtn.innerHTML;
+							showRandomBtn.innerHTML = '⏳ Selecting...';
+
+							try {
+								// OPTIMIZATION: Do random selection on frontend since we already have the database loaded!
+								// No need to make API call and re-download/re-filter the database
+
+								// Apply filters using existing filterPrompts function
+								const filteredPrompts = filterPrompts(promptsDatabase, filters);
+
+								if (filteredPrompts.length === 0) {
+									throw new Error("No prompts match the current filters");
+								}
+
+								// Randomly select prompts
+								const selectedCount = Math.min(count, filteredPrompts.length);
+								const shuffled = [...filteredPrompts].sort(() => Math.random() - 0.5);
+								const selected = shuffled.slice(0, selectedCount);
+
+								// Store and display random prompts
+								randomPrompts = selected;
+								randomCount = count;
+								showingRandomPrompts = true;
+								currentPage = 0; // Reset pagination
+								renderUI();
+								console.log(`[RPG] Showing ${selected.length} random prompts (from ${filteredPrompts.length} filtered)`);
+
+							} catch (error) {
+								console.error("[RPG] Error selecting random prompts:", error);
+								showRandomBtn.innerHTML = `✖ ${error.message}`;
+								setTimeout(() => {
+									showRandomBtn.innerHTML = originalText;
+									showRandomBtn.disabled = false;
+								}, 3000);
+							}
+						};
+					}
+
+					// Add all random prompts to batch
+					const addAllRandomBtn = container.querySelector(".instaraw-rpg-add-all-random-btn");
+					if (addAllRandomBtn) {
+						addAllRandomBtn.onclick = () => {
+							let added = 0;
+							randomPrompts.forEach(promptData => {
+								addPromptToBatch(promptData);
+								added++;
+							});
+							console.log(`[RPG] Added ${added} random prompts to batch`);
+
+							// Exit random mode
+							showingRandomPrompts = false;
+							randomPrompts = [];
+							renderUI();
+						};
+					}
+
+					// Reroll random prompts button
+					const rerollRandomBtn = container.querySelector(".instaraw-rpg-reroll-random-btn");
+					if (rerollRandomBtn) {
+						rerollRandomBtn.onclick = () => {
+							const count = randomCount; // Use same count as before
+							const filters = JSON.parse(node.properties.library_filters || "{}");
+
+							// Apply filters and randomly select
+							const filteredPrompts = filterPrompts(promptsDatabase, filters);
+
+							if (filteredPrompts.length === 0) {
+								alert("No prompts match the current filters");
+								return;
+							}
+
+							// Randomly select prompts (different from before)
+							const selectedCount = Math.min(count, filteredPrompts.length);
+							const shuffled = [...filteredPrompts].sort(() => Math.random() - 0.5);
+							const selected = shuffled.slice(0, selectedCount);
+
+							// Update and re-render
+							randomPrompts = selected;
+							renderUI();
+							console.log(`[RPG] Rerolled ${selected.length} random prompts`);
+						};
+					}
+
+					// Exit random mode button
+					const exitRandomBtn = container.querySelector(".instaraw-rpg-exit-random-btn");
+					if (exitRandomBtn) {
+						exitRandomBtn.onclick = () => {
+							showingRandomPrompts = false;
+							randomPrompts = [];
+							renderUI();
+						};
+					}
+
+					// Create custom prompt button
+					const createPromptBtn = container.querySelector(".instaraw-rpg-create-prompt-btn");
+					if (createPromptBtn) {
+						createPromptBtn.onclick = async () => {
+							try {
+								// Create empty prompt and add to user prompts
+								const newPrompt = await addUserPrompt({
+									positive: "",
+									negative: "",
+									tags: [],
+									content_type: "person",
+									safety_level: "sfw",
+									shot_type: "portrait"
+								});
+
+								// Immediately put it in edit mode
+								editingValues[newPrompt.id] = {
+									positive: "",
+									negative: "",
+									tags: "",
+									content_type: "person",
+									safety_level: "sfw",
+									shot_type: "portrait"
+								};
+								editingPrompts.add(newPrompt.id);
+								renderUI();
+								console.log("[RPG] Created new user prompt in edit mode");
+							} catch (error) {
+								console.error("[RPG] Error creating user prompt:", error);
+								alert(`Error creating prompt: ${error.message}`);
+							}
+						};
+					}
+
+					// Import prompts button
+					const importPromptsBtn = container.querySelector(".instaraw-rpg-import-prompts-btn");
+					if (importPromptsBtn) {
+						importPromptsBtn.onclick = () => {
+							const input = document.createElement("input");
+							input.type = "file";
+							input.accept = ".json";
+							input.onchange = async (e) => {
+								const file = e.target.files[0];
+								if (!file) return;
+
+								try {
+									const result = await importUserPrompts(file);
+									alert(`Successfully imported ${result.added} prompts${result.skipped > 0 ? ` (${result.skipped} duplicates skipped)` : ''}`);
+								} catch (error) {
+									console.error("[RPG] Error importing prompts:", error);
+									alert(`Error importing prompts: ${error.message}`);
+								}
+							};
+							input.click();
+						};
+					}
+
+					// Export prompts button
+					const exportPromptsBtn = container.querySelector(".instaraw-rpg-export-prompts-btn");
+					if (exportPromptsBtn) {
+						exportPromptsBtn.onclick = () => {
+							if (userPrompts.length === 0) {
+								alert("No user prompts to export");
+								return;
+							}
+							exportUserPrompts();
+						};
+					}
+
+					// Delete user prompt buttons
+					container.querySelectorAll(".instaraw-rpg-delete-user-prompt-btn").forEach((btn) => {
+						btn.onclick = async (e) => {
+							e.stopPropagation();
+							const promptId = btn.dataset.id;
+							const prompt = userPrompts.find(p => p.id === promptId);
+							if (!prompt) return;
+
+							const confirmMsg = `Delete this prompt?\n\nPositive: ${(prompt.prompt?.positive || '').substring(0, 100)}...`;
+							if (!confirm(confirmMsg)) return;
+
+							try {
+								await deleteUserPrompt(promptId);
+								console.log(`[RPG] Deleted user prompt ${promptId}`);
+
+								// If in random mode, remove from randomPrompts array
+								if (showingRandomPrompts) {
+									randomPrompts = randomPrompts.filter(p => p.id !== promptId);
+								}
+
+								// Refresh UI
+								renderUI();
+							} catch (error) {
+								console.error("[RPG] Error deleting user prompt:", error);
+								alert(`Error deleting prompt: ${error.message}`);
+							}
+						};
+					});
+
+					// Edit button - enter edit mode
+					container.querySelectorAll(".instaraw-rpg-edit-user-prompt-btn").forEach((btn) => {
+						btn.onclick = () => {
+							const promptId = btn.dataset.id;
+							const prompt = userPrompts.find(p => p.id === promptId);
+							if (prompt) {
+								// Store current values in edit buffer
+								editingValues[promptId] = {
+									positive: prompt.prompt?.positive || "",
+									negative: prompt.prompt?.negative || "",
+									tags: prompt.tags?.join(", ") || "",
+									content_type: prompt.classification?.content_type || "person",
+									safety_level: prompt.classification?.safety_level || "sfw",
+									shot_type: prompt.classification?.shot_type || "portrait"
+								};
+								editingPrompts.add(promptId);
+								renderUI();
+								console.log(`[RPG] Editing user prompt ${promptId}`);
+							}
+						};
+					});
+
+					// Save button - save changes and exit edit mode
+					container.querySelectorAll(".instaraw-rpg-save-user-prompt-btn").forEach((btn) => {
+						btn.onclick = async () => {
+							const promptId = btn.dataset.id;
+							const positiveTextarea = container.querySelector(`.instaraw-rpg-user-prompt-edit-positive[data-id="${promptId}"]`);
+							const negativeTextarea = container.querySelector(`.instaraw-rpg-user-prompt-edit-negative[data-id="${promptId}"]`);
+							const tagsInput = container.querySelector(`.instaraw-rpg-user-prompt-edit-tags[data-id="${promptId}"]`);
+							const contentTypeSelect = container.querySelector(`.instaraw-rpg-user-prompt-edit-content-type[data-id="${promptId}"]`);
+							const safetyLevelSelect = container.querySelector(`.instaraw-rpg-user-prompt-edit-safety-level[data-id="${promptId}"]`);
+							const shotTypeSelect = container.querySelector(`.instaraw-rpg-user-prompt-edit-shot-type[data-id="${promptId}"]`);
+
+							if (!positiveTextarea || !negativeTextarea || !tagsInput) return;
+
+							const tagsArray = tagsInput.value.split(",").map(t => t.trim()).filter(Boolean);
+
+							try {
+								await updateUserPrompt(promptId, {
+									prompt: {
+										positive: positiveTextarea.value,
+										negative: negativeTextarea.value
+									},
+									tags: tagsArray,
+									classification: {
+										content_type: contentTypeSelect?.value || "person",
+										safety_level: safetyLevelSelect?.value || "sfw",
+										shot_type: shotTypeSelect?.value || "portrait"
+									}
+								});
+								console.log(`[RPG] Saved user prompt ${promptId}`);
+
+								// Exit edit mode
+								editingPrompts.delete(promptId);
+								delete editingValues[promptId];
+								renderUI();
+							} catch (error) {
+								console.error("[RPG] Error saving user prompt:", error);
+								alert(`Error saving: ${error.message}`);
+							}
+						};
+					});
+
+					// Cancel button - discard changes and exit edit mode
+					container.querySelectorAll(".instaraw-rpg-cancel-edit-prompt-btn").forEach((btn) => {
+						btn.onclick = () => {
+							const promptId = btn.dataset.id;
+							editingPrompts.delete(promptId);
+							delete editingValues[promptId];
+							renderUI();
+							console.log(`[RPG] Cancelled editing user prompt ${promptId}`);
+						};
+					});
+
+					// Auto-resize textareas in edit mode
+					container.querySelectorAll(".instaraw-rpg-user-prompt-edit-positive, .instaraw-rpg-user-prompt-edit-negative").forEach((textarea) => {
+						autoResizeTextarea(textarea);
+						textarea.oninput = () => autoResizeTextarea(textarea);
+					});
+
+					// Update editingValues when classification dropdowns change
+					container.querySelectorAll(".instaraw-rpg-user-prompt-edit-content-type").forEach((select) => {
+						select.onchange = () => {
+							const promptId = select.dataset.id;
+							if (editingValues[promptId]) {
+								editingValues[promptId].content_type = select.value;
+							}
+						};
+					});
+
+					container.querySelectorAll(".instaraw-rpg-user-prompt-edit-safety-level").forEach((select) => {
+						select.onchange = () => {
+							const promptId = select.dataset.id;
+							if (editingValues[promptId]) {
+								editingValues[promptId].safety_level = select.value;
+							}
+						};
+					});
+
+					container.querySelectorAll(".instaraw-rpg-user-prompt-edit-shot-type").forEach((select) => {
+						select.onchange = () => {
+							const promptId = select.dataset.id;
+							if (editingValues[promptId]) {
+								editingValues[promptId].shot_type = select.value;
+							}
+						};
+					});
+
 					// Add to batch buttons (always adds)
 					container.querySelectorAll(".instaraw-rpg-add-to-batch-btn").forEach((btn) => {
 						btn.onclick = () => {
@@ -2448,6 +3369,25 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 						btn.onclick = (e) => {
 							e.stopPropagation();
 							toggleBookmark(btn.dataset.id);
+						};
+					});
+
+					// ID copy buttons
+					container.querySelectorAll(".instaraw-rpg-id-copy-btn").forEach((btn) => {
+						btn.onclick = (e) => {
+							e.stopPropagation();
+							const promptId = btn.dataset.id;
+							navigator.clipboard.writeText(promptId).then(() => {
+								// Visual feedback
+								const originalText = btn.textContent;
+								btn.textContent = "✅";
+								setTimeout(() => {
+									btn.textContent = originalText;
+								}, 1000);
+							}).catch(err => {
+								console.error("[RPG] Failed to copy ID:", err);
+								alert("Failed to copy ID to clipboard");
+							});
 						};
 					});
 
@@ -2666,6 +3606,16 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 						};
 					}
 
+					// Generation mode toggle buttons (Reality vs Creative)
+					container.querySelectorAll(".instaraw-rpg-mode-toggle-btn").forEach((btn) => {
+						btn.onclick = () => {
+							const mode = btn.dataset.mode;
+							node.properties.generation_style = mode;
+							renderUI(); // Re-render to update button styles
+							console.log(`[RPG] Switched to ${mode} mode`);
+						};
+					});
+
 					// Character text input (save on change + auto-resize)
 					const characterTextInput = container.querySelector(".instaraw-rpg-character-text-input");
 					if (characterTextInput) {
@@ -2763,6 +3713,17 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 					const generateUnifiedBtn = container.querySelector(".instaraw-rpg-generate-unified-btn");
 					if (generateUnifiedBtn) {
 						generateUnifiedBtn.onclick = generateUnifiedPrompts;
+					}
+
+					// Cancel generation button (for aborting in-progress generation)
+					const cancelGenerationBtn = container.querySelector(".instaraw-rpg-cancel-generation-btn");
+					if (cancelGenerationBtn) {
+						cancelGenerationBtn.onclick = () => {
+							if (generationAbortController) {
+								console.log("[RPG] 🛑 User clicked cancel - aborting generation");
+								generationAbortController.abort();
+							}
+						};
 					}
 
 					// Accept generated prompts button

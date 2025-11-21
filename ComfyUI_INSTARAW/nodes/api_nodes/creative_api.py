@@ -172,7 +172,7 @@ def parse_prompt_json(text):
         }]
 
 
-def build_system_prompt(is_sdxl=False, character_description="", generation_mode="img2img", affect_elements=None, user_text_input="", random_inspiration_prompts=None):
+def build_system_prompt(is_sdxl=False, character_description="", generation_mode="img2img", affect_elements=None, user_text_input="", random_inspiration_prompts=None, generation_style="reality"):
     """
     Build system prompt for creative generation.
 
@@ -183,6 +183,7 @@ def build_system_prompt(is_sdxl=False, character_description="", generation_mode
         affect_elements: List of elements to modify (img2img only): ["background", "outfit", "pose", "lighting"]
         user_text_input: User's custom input (txt2img only)
         random_inspiration_prompts: List of random prompts for inspiration (txt2img only)
+        generation_style: "reality" (strict adherence) or "creative" (flexible inspiration)
     """
     base_prompt = """You are an expert AI prompt engineer specializing in creating high-quality, detailed prompts for REALISTIC photographic image generation models.
 
@@ -214,13 +215,26 @@ IMPORTANT: All images are REALISTIC photography. Do not include artistic styles,
         base_prompt += "\n\nMODE: Text-to-Image Generation (creating new prompts from scratch)"
 
         if random_inspiration_prompts and len(random_inspiration_prompts) > 0:
-            base_prompt += "\n\nINSPIRATION PROMPTS: Use these prompts as creative inspiration for generating diverse, high-quality variations:"
-            for i, prompt in enumerate(random_inspiration_prompts[:5]):  # Limit to 5 for context
-                pos = prompt.get("prompt", {}).get("positive", "")
-                tags = ", ".join(prompt.get("tags", [])[:5])
-                base_prompt += f"\n\nInspiration {i+1}:"
-                base_prompt += f"\nPrompt: {pos[:200]}..."  # Truncate long prompts
-                base_prompt += f"\nTags: {tags}"
+            if generation_style == "reality":
+                # Reality Mode: Strict adherence to library prompts
+                base_prompt += "\n\n🎯 REALITY MODE: You must ONLY use elements, words, and concepts from these reference prompts. Stay precise and constrained to what's provided:"
+                for i, prompt in enumerate(random_inspiration_prompts[:5]):  # Limit to 5 for context
+                    pos = prompt.get("prompt", {}).get("positive", "")
+                    tags = ", ".join(prompt.get("tags", [])[:5])
+                    base_prompt += f"\n\nReference {i+1}:"
+                    base_prompt += f"\nPrompt: {pos[:200]}..."  # Truncate long prompts
+                    base_prompt += f"\nTags: {tags}"
+                base_prompt += "\n\nIMPORTANT: Your generated prompts should ONLY combine and rearrange elements from these references. Do not introduce new concepts or elements not present in these prompts."
+            else:
+                # Creative Mode: Flexible inspiration
+                base_prompt += "\n\n✨ CREATIVE MODE: Use these prompts as creative inspiration for generating diverse, high-quality variations. Feel free to be flexible and creative:"
+                for i, prompt in enumerate(random_inspiration_prompts[:5]):  # Limit to 5 for context
+                    pos = prompt.get("prompt", {}).get("positive", "")
+                    tags = ", ".join(prompt.get("tags", [])[:5])
+                    base_prompt += f"\n\nInspiration {i+1}:"
+                    base_prompt += f"\nPrompt: {pos[:200]}..."  # Truncate long prompts
+                    base_prompt += f"\nTags: {tags}"
+                base_prompt += "\n\nYou can be creative and add new elements while maintaining the overall style and quality of the inspiration prompts."
 
         if user_text_input and user_text_input.strip():
             base_prompt += f"\n\nUSER INPUT: Incorporate this user guidance into your prompts:\n{user_text_input}"
@@ -361,6 +375,9 @@ async def _generate_creative_prompts(request):
         random_inspiration_prompts = data.get("random_inspiration_prompts", [])
         user_text_input = data.get("user_text_input", "")
 
+        # NEW: Generation style (Reality vs Creative)
+        generation_style = data.get("generation_style", "reality")
+
         # Legacy support: convert old parameters to new format
         source_prompts = data.get("source_prompts", [])
         inspiration_count = int(data.get("inspiration_count", 0))
@@ -386,7 +403,8 @@ async def _generate_creative_prompts(request):
                 generation_mode=generation_mode,
                 affect_elements=affect_elements,
                 user_text_input=user_text_input,
-                random_inspiration_prompts=random_inspiration_prompts
+                random_inspiration_prompts=random_inspiration_prompts,
+                generation_style=generation_style
             )
 
         user_prompt = build_user_prompt(
