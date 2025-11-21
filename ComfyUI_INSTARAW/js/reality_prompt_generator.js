@@ -512,10 +512,12 @@ app.registerExtension({
 				};
 
 				const exportUserPrompts = () => {
+					const bookmarks = JSON.parse(node.properties.bookmarks || "[]");
 					const exportData = {
 						version: "1.0",
 						exported_at: new Date().toISOString(),
-						prompts: userPrompts
+						prompts: userPrompts,
+						bookmarks: bookmarks
 					};
 					const dataStr = JSON.stringify(exportData, null, 2);
 					const blob = new Blob([dataStr], { type: "application/json" });
@@ -527,7 +529,7 @@ app.registerExtension({
 					a.click();
 					document.body.removeChild(a);
 					URL.revokeObjectURL(url);
-					console.log(`[RPG] Exported ${userPrompts.length} user prompts`);
+					console.log(`[RPG] Exported ${userPrompts.length} user prompts and ${bookmarks.length} bookmarks`);
 				};
 
 				const importUserPrompts = async (file) => {
@@ -537,6 +539,7 @@ app.registerExtension({
 							try {
 								const data = JSON.parse(e.target.result);
 								const imported = data.prompts || [];
+								const importedBookmarks = data.bookmarks || [];
 
 								// Validate format
 								if (!Array.isArray(imported)) {
@@ -557,11 +560,16 @@ app.registerExtension({
 									}
 								});
 
+								// Merge bookmarks (avoid duplicates)
+								const currentBookmarks = JSON.parse(node.properties.bookmarks || "[]");
+								const mergedBookmarks = [...new Set([...currentBookmarks, ...importedBookmarks])];
+								node.properties.bookmarks = JSON.stringify(mergedBookmarks);
+
 								await saveUserPrompts(userPrompts);
 								mergeUserPromptsWithLibrary();
 								renderUI();
-								console.log(`[RPG] Imported ${added} new user prompts (${imported.length - added} duplicates skipped)`);
-								resolve({ added, skipped: imported.length - added });
+								console.log(`[RPG] Imported ${added} new user prompts (${imported.length - added} duplicates skipped) and ${importedBookmarks.length} bookmarks`);
+								resolve({ added, skipped: imported.length - added, bookmarks: importedBookmarks.length });
 							} catch (error) {
 								console.error("[RPG] Error importing user prompts:", error);
 								reject(error);
@@ -827,8 +835,8 @@ app.registerExtension({
 											<button class="instaraw-rpg-btn-secondary instaraw-rpg-import-prompts-btn" style="font-size: 12px; padding: 6px 12px;" title="Import prompts from JSON file">
 												📂 Import
 											</button>
-											<button class="instaraw-rpg-btn-secondary instaraw-rpg-export-prompts-btn" style="font-size: 12px; padding: 6px 12px;" title="Export my prompts to JSON file" ${userPrompts.length === 0 ? 'disabled' : ''}>
-												💾 Export (${userPrompts.length})
+											<button class="instaraw-rpg-btn-secondary instaraw-rpg-export-prompts-btn" style="font-size: 12px; padding: 6px 12px;" title="Export my prompts and bookmarks to JSON file" ${userPrompts.length === 0 && bookmarks.length === 0 ? 'disabled' : ''}>
+												💾 Export (${userPrompts.length + bookmarks.length})
 											</button>
 											<div style="width: 1px; height: 20px; background: #4b5563; margin: 0 4px;"></div>
 											<label style="font-size: 11px; color: #9ca3af; margin-right: 4px;">Random:</label>
@@ -970,8 +978,8 @@ app.registerExtension({
 													</div>
 												` : sdxlMode ? `
 													<!-- VIEW MODE (SDXL): Show tags as comma-separated text -->
-													<div class="instaraw-rpg-prompt-preview">
-														${allTags.map((tag) => highlightSearchTerm(tag, searchQuery)).join(", ")}
+													<div class="instaraw-rpg-prompt-preview ${allTags.length === 0 ? 'instaraw-rpg-error-text' : ''}">
+														${allTags.length > 0 ? allTags.map((tag) => highlightSearchTerm(tag, searchQuery)).join(", ") : "[Empty prompt]"}
 													</div>
 													<button class="instaraw-rpg-btn-secondary instaraw-rpg-edit-user-prompt-btn" data-id="${prompt.id}" style="font-size: 11px; padding: 4px 10px; margin-top: 8px; width: 100%;">
 														✏️ Edit Prompt
