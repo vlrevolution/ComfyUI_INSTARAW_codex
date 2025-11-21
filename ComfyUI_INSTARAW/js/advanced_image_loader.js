@@ -107,12 +107,12 @@ app.registerExtension({
 						return null;
 					}
 
-					console.log(`[INSTARAW AIL ${node.id}] Aspect ratio node output:`, {
-						selection,
-						slotIndex,
-						type: aspectRatioNode.type,
-						value: slotIndex === 0 ? config.width : slotIndex === 1 ? config.height : config.label
-					});
+					// console.log(`[INSTARAW AIL ${node.id}] Aspect ratio node output:`, {
+					// 	selection,
+					// 	slotIndex,
+					// 	type: aspectRatioNode.type,
+					// 	value: slotIndex === 0 ? config.width : slotIndex === 1 ? config.height : config.label
+					// });
 
 					// Return based on output slot (0=width, 1=height, 2=aspect_label)
 					if (slotIndex === 0) return config.width;
@@ -170,30 +170,98 @@ app.registerExtension({
 				 */
 				const isTxt2ImgMode = () => {
 					const enableImg2Img = getFinalInputValue("enable_img2img", true);
-					console.log(`[INSTARAW AIL ${node.id}] enable_img2img value:`, enableImg2Img, `(type: ${typeof enableImg2Img})`);
+					// console.log(`[INSTARAW AIL ${node.id}] enable_img2img value:`, enableImg2Img, `(type: ${typeof enableImg2Img})`);
 					const result = enableImg2Img === false || enableImg2Img === "false";
-					console.log(`[INSTARAW AIL ${node.id}] isTxt2ImgMode result:`, result);
+					// console.log(`[INSTARAW AIL ${node.id}] isTxt2ImgMode result:`, result);
 					return result;
+				};
+
+				/**
+				 * Switches to img2img mode by setting enable_img2img to true.
+				 * Works with both connected boolean nodes and local widgets.
+				 */
+				const switchToImg2ImgMode = () => {
+					console.log(`[INSTARAW AIL ${node.id}] === Switching to img2img mode ===`);
+
+					// First, try to find and update a connected boolean node
+					const input = node.inputs?.find(i => i.name === "enable_img2img");
+					console.log(`[INSTARAW AIL ${node.id}] enable_img2img input:`, input);
+
+					if (input && input.link != null) {
+						console.log(`[INSTARAW AIL ${node.id}] Input is linked, link ID:`, input.link);
+						const link = app.graph.links[input.link];
+						console.log(`[INSTARAW AIL ${node.id}] Link object:`, link);
+
+						if (link) {
+							const booleanNode = app.graph.getNodeById(link.origin_id);
+							console.log(`[INSTARAW AIL ${node.id}] Boolean node:`, booleanNode);
+							console.log(`[INSTARAW AIL ${node.id}] Boolean node type:`, booleanNode?.type);
+							console.log(`[INSTARAW AIL ${node.id}] Boolean node widgets:`, booleanNode?.widgets);
+
+							if (booleanNode && booleanNode.widgets && booleanNode.widgets.length > 0) {
+								const widget = booleanNode.widgets[0];
+								console.log(`[INSTARAW AIL ${node.id}] Widget name:`, widget.name);
+								console.log(`[INSTARAW AIL ${node.id}] Widget type:`, widget.type);
+								const oldValue = widget.value;
+								console.log(`[INSTARAW AIL ${node.id}] Old value:`, oldValue);
+
+								// Update the boolean node's widget value
+								widget.value = true;
+								console.log(`[INSTARAW AIL ${node.id}] New value set:`, widget.value);
+
+								// Trigger the widget's callback if it exists
+								if (widget.callback) {
+									console.log(`[INSTARAW AIL ${node.id}] Calling widget callback...`);
+									widget.callback.call(booleanNode, true, null, booleanNode, null, oldValue);
+								} else {
+									console.log(`[INSTARAW AIL ${node.id}] ⚠️ Widget has no callback!`);
+								}
+
+								console.log(`[INSTARAW AIL ${node.id}] ✅ Updated connected boolean node #${booleanNode.id} to true`);
+								app.graph.setDirtyCanvas(true, true);
+								return true;
+							}
+						}
+					}
+
+					// If not connected, try to update local widget
+					const widget = node.widgets?.find(w => w.name === "enable_img2img");
+					if (widget) {
+						const oldValue = widget.value;
+						widget.value = true;
+
+						// Trigger the widget's callback if it exists
+						if (widget.callback) {
+							widget.callback.call(node, true, null, node, null, oldValue);
+						}
+
+						console.log(`[INSTARAW AIL ${node.id}] Updated local enable_img2img widget to true`);
+						app.graph.setDirtyCanvas(true, true);
+						return true;
+					}
+
+					console.warn(`[INSTARAW AIL ${node.id}] Could not find enable_img2img input or widget`);
+					return false;
 				};
 
 				/**
 				 * Gets width, height, and aspect_label from connected nodes for txt2img mode.
 				 */
 				const getTxt2ImgDimensions = () => {
-					console.log(`[INSTARAW AIL ${node.id}] === Reading dimensions from connected nodes ===`);
+					// console.log(`[INSTARAW AIL ${node.id}] === Reading dimensions from connected nodes ===`);
 
 					const widthRaw = getFinalInputValue("width", 960);
 					const heightRaw = getFinalInputValue("height", 960);
 					const aspect_label_raw = getFinalInputValue("aspect_label", null);
 
-					console.log(`[INSTARAW AIL ${node.id}] Raw values:`, { widthRaw, heightRaw, aspect_label_raw });
+					// console.log(`[INSTARAW AIL ${node.id}] Raw values:`, { widthRaw, heightRaw, aspect_label_raw });
 
 					const width = parseInt(widthRaw) || 960;
 					const height = parseInt(heightRaw) || 960;
 					const aspect_label = aspect_label_raw || getAspectLabel(width, height);
 
-					console.log(`[INSTARAW AIL ${node.id}] Final dimensions:`, { width, height, aspect_label });
-					console.log(`[INSTARAW AIL ${node.id}] Expected tensor size: ${width}×${height} (${(width * height / 1000000).toFixed(2)}MP)`);
+					// console.log(`[INSTARAW AIL ${node.id}] Final dimensions:`, { width, height, aspect_label });
+					// console.log(`[INSTARAW AIL ${node.id}] Expected tensor size: ${width}×${height} (${(width * height / 1000000).toFixed(2)}MP)`);
 
 					return { width, height, aspect_label };
 				};
@@ -250,7 +318,7 @@ app.registerExtension({
 					}
 					currentDetectedMode = detectedMode;
 
-					console.log(`[INSTARAW AIL ${node.id}] Rendering ${detectedMode ? 'txt2img' : 'img2img'} gallery`);
+					// console.log(`[INSTARAW AIL ${node.id}] Rendering ${detectedMode ? 'txt2img' : 'img2img'} gallery`);
 					if (detectedMode) {
 						renderTxt2ImgGallery();
 					} else {
@@ -318,7 +386,7 @@ app.registerExtension({
                                         </div>
                                         <div class="instaraw-adv-loader-info">
                                             <div class="instaraw-adv-loader-filename" title="${img.original_name}">${img.original_name}</div>
-                                            <div class="instaraw-adv-loader-dimensions">${img.width}×${img.height}</div>
+                                            <div class="instaraw-adv-loader-dimensions">${img.width}×${img.height} (original)</div>
                                         </div>
                                     </div>`;
 								}).join("");
@@ -668,7 +736,30 @@ app.registerExtension({
 						files.forEach((file) => formData.append("files", file));
 						const response = await fetch("/instaraw/batch_upload", { method: "POST", body: formData });
 						const result = await response.json();
+						console.log(`[INSTARAW AIL ${node.id}] 📤 Upload result:`, result.success);
 						if (result.success) {
+							// Auto-switch to img2img mode FIRST if currently in txt2img mode
+							const wasInTxt2ImgMode = isTxt2ImgMode();
+							console.log(`[INSTARAW AIL ${node.id}] 📊 Current mode - isTxt2ImgMode:`, wasInTxt2ImgMode);
+							if (wasInTxt2ImgMode) {
+								console.log(`[INSTARAW AIL ${node.id}] 🔄 Auto-switching to img2img mode BEFORE adding images`);
+
+								// Properly swap data (backup txt2img, restore img2img)
+								node.properties.txt2img_data_backup = node.properties.batch_data;
+								node.properties.batch_data = node.properties.img2img_data_backup || JSON.stringify({ images: [], order: [], total_count: 0 });
+								console.log(`[INSTARAW AIL ${node.id}] 💾 Backed up txt2img data, restored img2img data`);
+
+								// Update the boolean
+								switchToImg2ImgMode();
+
+								// Manually update currentDetectedMode to prevent mode switch detection in renderGallery
+								currentDetectedMode = false; // false = img2img mode
+								console.log(`[INSTARAW AIL ${node.id}] ✅ Updated currentDetectedMode to img2img`);
+							} else {
+								console.log(`[INSTARAW AIL ${node.id}] ✅ Already in img2img mode, no switch needed`);
+							}
+
+							// NOW add images to batch_data (after mode switch completes)
 							const batchData = JSON.parse(node.properties.batch_data || "{}");
 							batchData.images = batchData.images || [];
 							batchData.order = batchData.order || [];
@@ -678,6 +769,7 @@ app.registerExtension({
 							});
 							batchData.total_count = batchData.images.reduce((sum, img) => sum + (img.repeat_count || 1), 0);
 							node.properties.batch_data = JSON.stringify(batchData);
+
 							syncBatchDataWidget();
 							renderGallery();
 						} else {
@@ -836,16 +928,32 @@ app.registerExtension({
 					container._hasFileDropListeners = true;
 
 					let dragCounter = 0; // Track nested drag events
+					let dragTimeout = null; // Timeout to auto-clear highlight
+
+					const clearDragHighlight = () => {
+						dragCounter = 0;
+						container.classList.remove("instaraw-adv-loader-drag-over");
+						if (dragTimeout) {
+							clearTimeout(dragTimeout);
+							dragTimeout = null;
+						}
+					};
 
 					const handleFileDrop = async (files) => {
+						console.log(`[INSTARAW AIL ${node.id}] 📂 Files dropped:`, files.length);
 						if (files.length === 0) return;
 
 						const uploadBtn = container.querySelector(".instaraw-adv-loader-upload-btn");
-						if (!uploadBtn) return;
+						let originalText = null;
 
-						const originalText = uploadBtn.textContent;
-						uploadBtn.textContent = "⏳ Uploading...";
-						uploadBtn.disabled = true;
+						// Update button state if it exists (might not exist in txt2img mode)
+						if (uploadBtn) {
+							originalText = uploadBtn.textContent;
+							uploadBtn.textContent = "⏳ Uploading...";
+							uploadBtn.disabled = true;
+						} else {
+							console.log(`[INSTARAW AIL ${node.id}] ℹ️ No upload button (probably in txt2img mode), proceeding anyway...`);
+						}
 
 						try {
 							const formData = new FormData();
@@ -853,8 +961,33 @@ app.registerExtension({
 							files.forEach((file) => formData.append("files", file));
 							const response = await fetch("/instaraw/batch_upload", { method: "POST", body: formData });
 							const result = await response.json();
+							console.log(`[INSTARAW AIL ${node.id}] 📤 Upload result:`, result.success);
+							console.log(`[INSTARAW AIL ${node.id}] 📤 Images returned:`, result.images?.length || 0);
 							if (result.success) {
+								// Auto-switch to img2img mode FIRST if currently in txt2img mode
+								const wasInTxt2ImgMode = isTxt2ImgMode();
+								console.log(`[INSTARAW AIL ${node.id}] 📊 Current mode - isTxt2ImgMode:`, wasInTxt2ImgMode);
+								if (wasInTxt2ImgMode) {
+									console.log(`[INSTARAW AIL ${node.id}] 🔄 Auto-switching to img2img mode BEFORE adding images`);
+
+									// Properly swap data (backup txt2img, restore img2img)
+									node.properties.txt2img_data_backup = node.properties.batch_data;
+									node.properties.batch_data = node.properties.img2img_data_backup || JSON.stringify({ images: [], order: [], total_count: 0 });
+									console.log(`[INSTARAW AIL ${node.id}] 💾 Backed up txt2img data, restored img2img data`);
+
+									// Update the boolean
+									switchToImg2ImgMode();
+
+									// Manually update currentDetectedMode to prevent mode switch detection in renderGallery
+									currentDetectedMode = false; // false = img2img mode
+									console.log(`[INSTARAW AIL ${node.id}] ✅ Updated currentDetectedMode to img2img`);
+								} else {
+									console.log(`[INSTARAW AIL ${node.id}] ✅ Already in img2img mode, no switch needed`);
+								}
+
+								// NOW add images to batch_data (after mode switch completes)
 								const batchData = JSON.parse(node.properties.batch_data || "{}");
+								console.log(`[INSTARAW AIL ${node.id}] 📦 Batch data before:`, batchData);
 								batchData.images = batchData.images || [];
 								batchData.order = batchData.order || [];
 								result.images.forEach((img) => {
@@ -863,6 +996,8 @@ app.registerExtension({
 								});
 								batchData.total_count = batchData.images.reduce((sum, img) => sum + (img.repeat_count || 1), 0);
 								node.properties.batch_data = JSON.stringify(batchData);
+								console.log(`[INSTARAW AIL ${node.id}] 📦 Batch data after:`, JSON.parse(node.properties.batch_data));
+
 								syncBatchDataWidget();
 								renderGallery();
 							} else {
@@ -871,8 +1006,11 @@ app.registerExtension({
 						} catch (error) {
 							alert(`Upload error: ${error.message}`);
 						} finally {
-							uploadBtn.textContent = originalText;
-							uploadBtn.disabled = false;
+							// Reset button state if it exists
+							if (uploadBtn && originalText) {
+								uploadBtn.textContent = originalText;
+								uploadBtn.disabled = false;
+							}
 						}
 					};
 
@@ -882,6 +1020,9 @@ app.registerExtension({
 						dragCounter++;
 						if (e.dataTransfer.types.includes("Files")) {
 							container.classList.add("instaraw-adv-loader-drag-over");
+							// Set timeout to auto-clear if drag is abandoned
+							if (dragTimeout) clearTimeout(dragTimeout);
+							dragTimeout = setTimeout(clearDragHighlight, 200);
 						}
 					});
 
@@ -890,6 +1031,9 @@ app.registerExtension({
 						e.stopPropagation();
 						if (e.dataTransfer.types.includes("Files")) {
 							e.dataTransfer.dropEffect = "copy";
+							// Reset timeout while actively dragging over
+							if (dragTimeout) clearTimeout(dragTimeout);
+							dragTimeout = setTimeout(clearDragHighlight, 200);
 						}
 					});
 
@@ -898,15 +1042,14 @@ app.registerExtension({
 						e.stopPropagation();
 						dragCounter--;
 						if (dragCounter === 0) {
-							container.classList.remove("instaraw-adv-loader-drag-over");
+							clearDragHighlight();
 						}
 					});
 
 					container.addEventListener("drop", (e) => {
 						e.preventDefault();
 						e.stopPropagation();
-						dragCounter = 0;
-						container.classList.remove("instaraw-adv-loader-drag-over");
+						clearDragHighlight();
 
 						// Only handle file drops, not reordering
 						if (e.dataTransfer.getData("text/plain") === "instaraw-reorder") {
@@ -918,12 +1061,50 @@ app.registerExtension({
 							handleFileDrop(files);
 						}
 					});
+
+					// Global dragend listener to reset highlight when drag is cancelled
+					document.addEventListener("dragend", clearDragHighlight);
+					document.addEventListener("drop", clearDragHighlight);
+
+					// Store cleanup function on node
+					node._cleanupDragListeners = () => {
+						document.removeEventListener("dragend", clearDragHighlight);
+						document.removeEventListener("drop", clearDragHighlight);
+						if (dragTimeout) clearTimeout(dragTimeout);
+					};
 				};
 
 				const widget = node.addDOMWidget("batch_display", "batchloader", container, { getValue: () => node.properties.batch_data, setValue: (v) => { node.properties.batch_data = v; renderGallery(); }, serialize: false });
 				widget.computeSize = (width) => [width, cachedHeight + 2];
 				node._updateCachedHeight = updateCachedHeight;
 				node._renderGallery = renderGallery;
+
+				// Update existing latents with new dimensions
+				const updateLatentsWithNewDimensions = () => {
+					if (!isTxt2ImgMode()) return; // Only for txt2img mode
+
+					const currentDims = getTxt2ImgDimensions();
+					const batchData = JSON.parse(node.properties.batch_data || "{}");
+
+					if (batchData.latents && batchData.latents.length > 0) {
+						// Check if dimensions actually changed
+						const firstLatent = batchData.latents[0];
+						if (firstLatent.width !== currentDims.width ||
+						    firstLatent.height !== currentDims.height ||
+						    firstLatent.aspect_label !== currentDims.aspect_label) {
+
+							console.log(`[INSTARAW AIL ${node.id}] 🔄 Updating ${batchData.latents.length} latents: ${firstLatent.width}×${firstLatent.height} (${firstLatent.aspect_label}) → ${currentDims.width}×${currentDims.height} (${currentDims.aspect_label})`);
+
+							batchData.latents.forEach(latent => {
+								latent.width = currentDims.width;
+								latent.height = currentDims.height;
+								latent.aspect_label = currentDims.aspect_label;
+							});
+							node.properties.batch_data = JSON.stringify(batchData);
+							syncBatchDataWidget();
+						}
+					}
+				};
 
 				// Add widget change callbacks to automatically refresh
 				const setupWidgetCallbacks = () => {
@@ -947,12 +1128,13 @@ app.registerExtension({
 						batchIndexWidget._instaraw_callback_added = true;
 					}
 
-					// Aspect ratio widgets - re-render when dimensions change
+					// Aspect ratio widgets - update latents AND re-render when dimensions change
 					const widthWidget = node.widgets?.find((w) => w.name === "width");
 					if (widthWidget && !widthWidget._instaraw_callback_added) {
 						const originalCallback = widthWidget.callback;
 						widthWidget.callback = function() {
 							if (originalCallback) originalCallback.apply(this, arguments);
+							updateLatentsWithNewDimensions();
 							renderGallery();
 						};
 						widthWidget._instaraw_callback_added = true;
@@ -963,6 +1145,7 @@ app.registerExtension({
 						const originalCallback = heightWidget.callback;
 						heightWidget.callback = function() {
 							if (originalCallback) originalCallback.apply(this, arguments);
+							updateLatentsWithNewDimensions();
 							renderGallery();
 						};
 						heightWidget._instaraw_callback_added = true;
@@ -973,6 +1156,7 @@ app.registerExtension({
 						const originalCallback = aspectLabelWidget.callback;
 						aspectLabelWidget.callback = function() {
 							if (originalCallback) originalCallback.apply(this, arguments);
+							updateLatentsWithNewDimensions();
 							renderGallery();
 						};
 						aspectLabelWidget._instaraw_callback_added = true;
@@ -1004,6 +1188,7 @@ app.registerExtension({
 							const dimsKey = `${currentDims.width}x${currentDims.height}:${currentDims.aspect_label}`;
 							if (lastDimensions !== null && lastDimensions !== dimsKey) {
 								console.log(`[INSTARAW AIL ${node.id}] Dimensions changed: ${lastDimensions} -> ${dimsKey}`);
+								updateLatentsWithNewDimensions();
 								renderGallery();
 							}
 							lastDimensions = dimsKey;

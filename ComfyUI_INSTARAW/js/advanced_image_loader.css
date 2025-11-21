@@ -523,7 +523,8 @@
 /* === Drag and Drop File Upload Visual Feedback === */
 .instaraw-adv-loader-drag-over {
 	position: relative;
-	border: 3px dashed #60a5fa !important;
+	outline: 3px dashed #60a5fa !important;
+	outline-offset: -3px !important;
 	background: rgba(59, 130, 246, 0.1) !important;
 	box-shadow: 0 0 20px rgba(59, 130, 246, 0.3) !important;
 }

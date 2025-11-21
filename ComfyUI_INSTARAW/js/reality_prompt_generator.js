@@ -162,12 +162,12 @@ app.registerExtension({
 						return null;
 					}
 
-					console.log(`[RPG] Aspect ratio node output:`, {
-						selection,
-						slotIndex,
-						type: aspectRatioNode.type,
-						value: slotIndex === 0 ? config.width : slotIndex === 1 ? config.height : config.label
-					});
+					// console.log(`[RPG] Aspect ratio node output:`, {
+					// 	selection,
+					// 	slotIndex,
+					// 	type: aspectRatioNode.type,
+					// 	value: slotIndex === 0 ? config.width : slotIndex === 1 ? config.height : config.label
+					// });
 
 					// Return based on output slot (0=width, 1=height, 2=aspect_label)
 					if (slotIndex === 0) return config.width;
@@ -244,7 +244,7 @@ app.registerExtension({
 							aspect_label: aspect_label || "1:1"
 						};
 
-						console.log("[RPG] Target dimensions from aspect ratio node:", dims);
+						// console.log("[RPG] Target dimensions from aspect ratio node:", dims);
 						return dims;
 					} catch (error) {
 						console.error('[RPG] Error in getTargetDimensions:', error);

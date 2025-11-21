@@ -71,24 +71,27 @@ class INSTARAW_ImageFilter(PreviewImage):
     
     @classmethod
     def IS_CHANGED(cls, *args, **kwargs):
+        # Always rerun - this is an interactive node
         return float("NaN")
     
     def func(self, images, timeout, ontimeout, cache_behavior, uid, node_identifier, tip="", extra1="", extra2="", extra3="", latents=None, masks=None, pick_list_start:int=0, pick_list:str="", video_frames:int=1, **kwargs):
         e1, e2, e3 = extra1, extra2, extra3
         B = images.shape[0]
         if video_frames > B: video_frames = 1
-        
+
         cache_dir = os.path.join(os.path.dirname(__file__), "..", "..", "cache")
         os.makedirs(cache_dir, exist_ok=True)
-        
+
         hasher = hashlib.sha256()
         hasher.update(images.cpu().numpy().tobytes())
         cache_key = hasher.hexdigest()
         cache_filepath = os.path.join(cache_dir, f"{cache_key}_selection.json")
 
         images_to_return = None
+
+        # Check if we should use cached selection
         if cache_behavior == "Resend previous selection" and os.path.exists(cache_filepath):
-            print(f"✅ INSTARAW Image Filter Cache Hit! Resending previous selection from {cache_filepath}")
+            print(f"✅ Image Filter: Using cached selection for images {cache_key[:8]}...")
             with open(cache_filepath, 'r') as f:
                 cached_data = json.load(f)
             images_to_return = cached_data.get('selection', [])
@@ -135,7 +138,7 @@ class INSTARAW_ImageFilter(PreviewImage):
 
         try: int(pick_list_start)
         except: pick_list_start = 0
-                
+
         return (images, latents, masks, e1, e2, e3, ",".join(str(int(x)+int(pick_list_start)) for x in images_to_return))
     
 class INSTARAW_TextImageFilter(PreviewImage):
