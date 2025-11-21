@@ -2759,22 +2759,51 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 
 											// Parse response (handle multiple formats)
 											const parseStructuredPrompt = (text) => {
-												const lines = text.split('\\n').map(l => l.trim()).filter(l => l);
+												// Handle both \n and \\n line breaks
+												const normalizedText = text.replace(/\\n/g, '\n');
+
 												const parsed = {
 													positive: "",
 													negative: "",
 													tags: [],
 													classification: { content_type: "other", safety_level: "sfw", shot_type: "other" }
 												};
-												lines.forEach(line => {
-													if (line.startsWith('POSITIVE:')) parsed.positive = line.substring(9).trim();
-													else if (line.startsWith('NEGATIVE:')) parsed.negative = line.substring(9).trim();
-													else if (line.startsWith('CONTENT_TYPE:')) parsed.classification.content_type = line.substring(13).trim().toLowerCase();
-													else if (line.startsWith('SAFETY_LEVEL:')) parsed.classification.safety_level = line.substring(13).trim().toLowerCase();
-													else if (line.startsWith('SHOT_TYPE:')) parsed.classification.shot_type = line.substring(10).trim().toLowerCase();
-													else if (line.startsWith('TAGS:')) parsed.tags = line.substring(5).trim().split(',').map(t => t.trim()).filter(t => t);
-												});
+
+												// Try to find key sections using regex
+												const negativeMatch = normalizedText.match(/NEGATIVE:\s*(.+?)(?=\n(?:CONTENT_TYPE|SAFETY_LEVEL|SHOT_TYPE|TAGS|$))/is);
+												const contentTypeMatch = normalizedText.match(/CONTENT_TYPE:\s*(.+?)(?=\n|$)/i);
+												const safetyLevelMatch = normalizedText.match(/SAFETY_LEVEL:\s*(.+?)(?=\n|$)/i);
+												const shotTypeMatch = normalizedText.match(/SHOT_TYPE:\s*(.+?)(?=\n|$)/i);
+												const tagsMatch = normalizedText.match(/TAGS:\s*(.+?)(?=\n|$)/is);
+
+												// Extract NEGATIVE (if found)
+												if (negativeMatch) {
+													parsed.negative = negativeMatch[1].trim();
+												}
+
+												// Extract POSITIVE - either with prefix or everything before NEGATIVE
+												const positiveMatch = normalizedText.match(/POSITIVE:\s*(.+?)(?=\nNEGATIVE:|$)/is);
+												if (positiveMatch) {
+													parsed.positive = positiveMatch[1].trim();
+												} else if (negativeMatch) {
+													// No POSITIVE: prefix found, extract everything before NEGATIVE:
+													const beforeNegative = normalizedText.split(/\nNEGATIVE:/i)[0];
+													parsed.positive = beforeNegative.trim();
+												} else {
+													// No structure found, check if there's any text before metadata fields
+													const beforeMetadata = normalizedText.split(/\n(?:CONTENT_TYPE|SAFETY_LEVEL|SHOT_TYPE|TAGS):/i)[0];
+													parsed.positive = beforeMetadata.trim();
+												}
+
+												// Extract metadata
+												if (contentTypeMatch) parsed.classification.content_type = contentTypeMatch[1].trim().toLowerCase();
+												if (safetyLevelMatch) parsed.classification.safety_level = safetyLevelMatch[1].trim().toLowerCase();
+												if (shotTypeMatch) parsed.classification.shot_type = shotTypeMatch[1].trim().toLowerCase();
+												if (tagsMatch) parsed.tags = tagsMatch[1].split(',').map(t => t.trim()).filter(t => t);
+
+												// Fallback: if still no positive, use entire text
 												if (!parsed.positive && text) parsed.positive = text;
+
 												return parsed;
 											};
 
