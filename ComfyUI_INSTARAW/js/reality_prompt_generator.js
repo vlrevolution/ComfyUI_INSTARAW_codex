@@ -1044,6 +1044,11 @@ app.registerExtension({
 					setupEventHandlers();
 					setupDragAndDrop();
 
+					// Restore generation UI if there are completed or in-progress generations
+					if ((node._generatedUnifiedPrompts || node._generationInProgress) && activeTab === "generate") {
+						restoreGenerationUI();
+					}
+
 					// Force height update after DOM settles
 					setTimeout(() => updateCachedHeight(), 0);
 					setTimeout(() => updateCachedHeight(), 100);
@@ -1822,7 +1827,7 @@ app.registerExtension({
 						</button>
 
 						<!-- Progress Tracking Section -->
-						<div class="instaraw-rpg-generation-progress" style="display: none;">
+						<div class="instaraw-rpg-generation-progress" style="display: ${node._generationInProgress || node._generatedUnifiedPrompts ? 'block' : 'none'};">
 							<div class="instaraw-rpg-progress-header">
 								<h4>Generating Prompts...</h4>
 								<button class="instaraw-rpg-btn-secondary instaraw-rpg-cancel-generation-btn">⏹ Cancel Generation</button>
@@ -1831,7 +1836,7 @@ app.registerExtension({
 						</div>
 
 						<!-- Preview Section -->
-						<div class="instaraw-rpg-generate-preview" style="display: none;">
+						<div class="instaraw-rpg-generate-preview" style="display: ${node._generatedUnifiedPrompts ? 'block' : 'none'};">
 							<h4>Generated Prompts Preview</h4>
 							<div class="instaraw-rpg-generate-preview-list"></div>
 							<button class="instaraw-rpg-btn-primary instaraw-rpg-accept-generated-btn">✓ Add to Batch</button>
@@ -3119,6 +3124,18 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 						previewSection.style.display = "none";
 					}
 
+					// Mark generation as in progress
+					node._generationInProgress = true;
+					node._generationCount = generationCount;
+
+					// Initialize progress state
+					node._progressState = Array.from({ length: generationCount }, (_, i) => ({
+						index: i,
+						status: 'pending',
+						progress: 0,
+						message: ''
+					}));
+
 					if (progressSection) {
 						progressSection.style.display = "block";
 					}
@@ -3161,10 +3178,6 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 						// PARALLEL GENERATION with 222ms stagger
 						const generateSinglePrompt = async (index) => {
 							const i = index;
-							const progressItem = progressItems?.querySelector(`[data-index="${i}"]`);
-							const statusBadge = progressItem?.querySelector(".instaraw-rpg-progress-item-status");
-							const progressBar = progressItem?.querySelector(".instaraw-rpg-progress-item-fill");
-							const messageDiv = progressItem?.querySelector(".instaraw-rpg-progress-item-message");
 
 							try {
 								// Sample UNIQUE source prompts for THIS generation
@@ -3193,25 +3206,14 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 								);
 
 								// Update status to in-progress
-								if (progressItem) progressItem.classList.add("in-progress");
-								if (statusBadge) {
-									statusBadge.className = "instaraw-rpg-progress-item-status in-progress";
-									statusBadge.textContent = "⚡ Generating...";
-								}
-								if (progressBar) {
-									progressBar.style.width = "100%";
-									progressBar.classList.add("animating");
-								}
+								updateProgressState(i, { status: 'in-progress', progress: 100 });
 
 								console.log(`[RPG] 📝 [${i + 1}] Starting generation with ${thisPromptSources.length} unique source prompts...`);
 
 								// For img2img: Convert image to base64
 								let imageBase64 = null;
 								if (isImg2Img && uniqueImages[i]) {
-									if (messageDiv) {
-										messageDiv.textContent = "Converting image to base64...";
-										messageDiv.className = "instaraw-rpg-progress-item-message";
-									}
+									updateProgressState(i, { message: "Converting image to base64..." });
 									try {
 										imageBase64 = await imageUrlToBase64(uniqueImages[i].url);
 										console.log(`[RPG] 📷 [${i + 1}] Image converted to base64 (${imageBase64.length} chars)`);
@@ -3431,23 +3433,9 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 								console.log(`[RPG] ✅ [${i + 1}] Saved with ID: ${savedPrompt.id}`);
 
 								// Update UI - success
-								if (progressItem) {
-									progressItem.classList.remove("in-progress");
-									progressItem.classList.add("success");
-								}
-								if (statusBadge) {
-									statusBadge.className = "instaraw-rpg-progress-item-status success";
-									statusBadge.textContent = "✓ Complete";
-								}
-								if (progressBar) {
-									progressBar.classList.remove("animating");
-									progressBar.style.width = "100%";
-								}
-								if (messageDiv) {
-									const preview = promptResult.positive?.slice(0, 80) || "No content";
-									messageDiv.textContent = preview + (promptResult.positive?.length > 80 ? "..." : "");
-									messageDiv.className = "instaraw-rpg-progress-item-message";
-								}
+								const preview = promptResult.positive?.slice(0, 80) || "No content";
+								const message = preview + (promptResult.positive?.length > 80 ? "..." : "");
+								updateProgressState(i, { status: 'success', progress: 100, message });
 
 								return { status: 'success', index: i, prompt: promptResult };
 
@@ -3455,22 +3443,8 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 								console.error(`[RPG] ❌ [${i + 1}] Error:`, error.message);
 
 								// Update UI - error
-								if (progressItem) {
-									progressItem.classList.remove("in-progress");
-									progressItem.classList.add("error");
-								}
-								if (statusBadge) {
-									statusBadge.className = "instaraw-rpg-progress-item-status error";
-									statusBadge.textContent = error.message.includes("Cancelled") ? "⏹ Cancelled" : "✖ Failed";
-								}
-								if (progressBar) {
-									progressBar.classList.remove("animating");
-									progressBar.style.width = "0%";
-								}
-								if (messageDiv) {
-									messageDiv.textContent = error.message || "Generation failed";
-									messageDiv.className = "instaraw-rpg-progress-item-message error";
-								}
+								const status = error.message.includes("Cancelled") ? 'cancelled' : 'error';
+								updateProgressState(i, { status, progress: 0, message: error.message || "Generation failed" });
 
 								return { status: 'error', index: i, error };
 							}
@@ -3506,8 +3480,21 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 						if (allGeneratedPrompts.length > 0) {
 							console.log(`[RPG] ✅ Generated ${allGeneratedPrompts.length}/${generationCount} prompts successfully`);
 
-							// Update progress header with completion statistics
-							const progressHeader = progressSection?.querySelector(".instaraw-rpg-progress-header h4");
+							// Store generated prompts and update state FIRST (regardless of which tab is active)
+							node._generatedUnifiedPrompts = allGeneratedPrompts;
+							node._generationInProgress = false; // Mark as complete
+							delete node._progressState; // Clear progress state
+							console.log(`[RPG] State updated: ${allGeneratedPrompts.length} prompts stored`);
+
+							// Query for FRESH DOM elements (in case user switched tabs during generation)
+							const currentProgressSection = container.querySelector(".instaraw-rpg-generation-progress");
+							const currentPreviewSection = container.querySelector(".instaraw-rpg-generate-preview");
+							const currentPreviewList = container.querySelector(".instaraw-rpg-generate-preview-list");
+
+							console.log(`[RPG] Found elements - progress: ${!!currentProgressSection}, preview: ${!!currentPreviewSection}, list: ${!!currentPreviewList}`);
+
+							// Update UI elements if they exist (only if on Generate tab)
+							const progressHeader = currentProgressSection?.querySelector(".instaraw-rpg-progress-header h4");
 							if (progressHeader) {
 								const successCount = allGeneratedPrompts.length;
 								const failedCount = generationCount - successCount;
@@ -3518,13 +3505,13 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 								`;
 							}
 
-							// Hide cancel button
-							const cancelBtn = progressSection?.querySelector(".instaraw-rpg-cancel-generation-btn");
+							// Hide cancel button if it exists
+							const cancelBtn = currentProgressSection?.querySelector(".instaraw-rpg-cancel-generation-btn");
 							if (cancelBtn) cancelBtn.style.display = "none";
 
-							const previewList = container.querySelector(".instaraw-rpg-generate-preview-list");
-							if (previewSection && previewList) {
-								previewList.innerHTML = allGeneratedPrompts
+							// Update preview list if it exists
+							if (currentPreviewSection && currentPreviewList) {
+								currentPreviewList.innerHTML = allGeneratedPrompts
 									.map((p, idx) => `
 										<div class="instaraw-rpg-preview-item">
 											<strong>#${idx + 1}</strong>
@@ -3534,15 +3521,16 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 									.join("");
 
 								// Show preview (keep progress visible for stats)
-								previewSection.style.display = "block";
-
-								// Store generated prompts temporarily
-								node._generatedUnifiedPrompts = allGeneratedPrompts;
-								setupEventHandlers();
-
-								// Keep progress section visible until user clicks "Add to Batch"
-								// This prevents layout shift and lets users review stats
+								currentPreviewSection.style.display = "block";
+								console.log(`[RPG] Preview UI updated (on Generate tab)`);
+							} else {
+								console.log(`[RPG] Preview UI skipped (on different tab - will restore on tab switch)`);
 							}
+
+							setupEventHandlers();
+
+							// Keep progress section visible until user clicks "Add to Batch"
+							// This prevents layout shift and lets users review stats
 						} else if (cancelRequested) {
 							console.log("[RPG] ⏹ Generation cancelled - no prompts generated");
 
@@ -3565,6 +3553,11 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 						console.error("[RPG] ❌ Error during parallel prompt generation:", error);
 						console.error("[RPG] Error stack:", error.stack);
 
+						// Clear generation state
+						node._generationInProgress = false;
+						delete node._progressState;
+						delete node._generationCount;
+
 						// Hide progress section, show error
 						if (progressSection) progressSection.style.display = "none";
 						alert(`Generation error: ${error.message || error}`);
@@ -3584,6 +3577,155 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 
 						console.log("[RPG] Generate Unified Prompts - END (Sequential)");
 						console.groupEnd();
+					}
+				};
+
+				// === Update Progress State (updates both DOM and node state) ===
+				const updateProgressState = (index, updates) => {
+					if (!node._progressState || !node._progressState[index]) return;
+
+					// Update node state
+					Object.assign(node._progressState[index], updates);
+
+					// Update DOM if elements exist
+					const progressItems = container.querySelector(".instaraw-rpg-progress-items");
+					const progressItem = progressItems?.querySelector(`[data-index="${index}"]`);
+					if (!progressItem) return;
+
+					const statusBadge = progressItem.querySelector(".instaraw-rpg-progress-item-status");
+					const progressBar = progressItem.querySelector(".instaraw-rpg-progress-item-fill");
+					const messageDiv = progressItem.querySelector(".instaraw-rpg-progress-item-message");
+
+					// Update status
+					if (updates.status) {
+						const statusMap = {
+							'pending': { class: 'pending', text: '⏳ Pending' },
+							'in-progress': { class: 'in-progress', text: '⏳ Generating...' },
+							'success': { class: 'success', text: '✓ Complete' },
+							'error': { class: 'error', text: '✖ Failed' },
+							'cancelled': { class: 'error', text: '⏹ Cancelled' }
+						};
+						const statusInfo = statusMap[updates.status];
+						if (statusBadge && statusInfo) {
+							statusBadge.className = `instaraw-rpg-progress-item-status ${statusInfo.class}`;
+							statusBadge.textContent = statusInfo.text;
+						}
+						if (statusInfo) {
+							progressItem.classList.remove('pending', 'in-progress', 'success', 'error');
+							progressItem.classList.add(statusInfo.class);
+						}
+					}
+
+					// Update progress bar
+					if (updates.progress !== undefined && progressBar) {
+						progressBar.style.width = `${updates.progress}%`;
+						if (updates.status === 'in-progress') {
+							progressBar.classList.add('animating');
+						} else {
+							progressBar.classList.remove('animating');
+						}
+					}
+
+					// Update message
+					if (updates.message !== undefined && messageDiv) {
+						messageDiv.textContent = updates.message;
+						messageDiv.className = 'instaraw-rpg-progress-item-message';
+					}
+				};
+
+				// === Restore Generation UI (after tab switch) ===
+				const restoreGenerationUI = () => {
+					const progressSection = container.querySelector(".instaraw-rpg-generation-progress");
+					const previewSection = container.querySelector(".instaraw-rpg-generate-preview");
+					const progressItems = container.querySelector(".instaraw-rpg-progress-items");
+
+					console.log(`[RPG] restoreGenerationUI called - inProgress: ${node._generationInProgress}, hasCompleted: ${!!node._generatedUnifiedPrompts}, hasState: ${!!node._progressState}`);
+
+					// If generation completed, restore the preview
+					if (node._generatedUnifiedPrompts) {
+						console.log(`[RPG] Restoring completed generation with ${node._generatedUnifiedPrompts.length} prompts`);
+
+						// Update progress header with completion statistics
+						const progressHeader = progressSection?.querySelector(".instaraw-rpg-progress-header h4");
+						if (progressHeader) {
+							const successCount = node._generatedUnifiedPrompts.length;
+							progressHeader.innerHTML = `
+								✓ Generation Complete:
+								<span style="color: #22c55e">${successCount} succeeded</span>
+							`;
+						}
+
+						// Hide cancel button
+						const cancelBtn = progressSection?.querySelector(".instaraw-rpg-cancel-generation-btn");
+						if (cancelBtn) cancelBtn.style.display = "none";
+
+						// Populate preview list
+						const previewList = container.querySelector(".instaraw-rpg-generate-preview-list");
+						console.log(`[RPG] Preview list element found: ${!!previewList}`);
+						if (previewList) {
+							previewList.innerHTML = node._generatedUnifiedPrompts
+								.map((p, idx) => `
+									<div class="instaraw-rpg-preview-item">
+										<strong>#${idx + 1}</strong>
+										<p>${escapeHtml(p.positive || "")}</p>
+									</div>
+								`)
+								.join("");
+							console.log(`[RPG] Preview list populated with ${node._generatedUnifiedPrompts.length} items`);
+						} else {
+							console.error(`[RPG] Preview list element not found!`);
+						}
+
+						return; // Exit early after handling completed generation
+					}
+
+					// Restore in-progress generation
+					if (node._generationInProgress && node._progressState) {
+						console.log(`[RPG] Restoring in-progress generation with ${node._progressState.length} items`);
+
+						// Recreate progress items from state
+						if (progressItems) {
+							progressItems.innerHTML = "";
+							const generationCount = node._generationCount || node._progressState.length;
+
+							node._progressState.forEach((state, i) => {
+								const progressItem = document.createElement("div");
+								progressItem.className = `instaraw-rpg-progress-item ${state.status}`;
+								progressItem.dataset.index = i;
+
+								const statusMap = {
+									'pending': '⏳ Pending',
+									'in-progress': '⏳ Generating...',
+									'success': '✓ Complete',
+									'error': '✖ Failed',
+									'cancelled': '⏹ Cancelled'
+								};
+
+								progressItem.innerHTML = `
+									<div class="instaraw-rpg-progress-item-header">
+										<span class="instaraw-rpg-progress-item-label">Prompt ${i + 1}/${generationCount}</span>
+										<span class="instaraw-rpg-progress-item-status ${state.status}">${statusMap[state.status] || '⏳ Pending'}</span>
+									</div>
+									<div class="instaraw-rpg-progress-item-bar">
+										<div class="instaraw-rpg-progress-item-fill ${state.status === 'in-progress' ? 'animating' : ''}" style="width: ${state.progress}%"></div>
+									</div>
+									<div class="instaraw-rpg-progress-item-message">${state.message || ''}</div>
+								`;
+								progressItems.appendChild(progressItem);
+							});
+						}
+
+						const progressHeader = progressSection?.querySelector(".instaraw-rpg-progress-header h4");
+						if (progressHeader) {
+							progressHeader.innerHTML = `⏳ Generating Prompts...`;
+						}
+					} else if (node._generationInProgress) {
+						// Generation still in progress but no state - show message
+						console.log(`[RPG] Generation in progress but no state to restore`);
+						const progressHeader = progressSection?.querySelector(".instaraw-rpg-progress-header h4");
+						if (progressHeader) {
+							progressHeader.innerHTML = `⏳ Generation in progress...`;
+						}
 					}
 				};
 
@@ -3612,6 +3754,9 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 
 					setPromptBatchData(promptQueue);
 					delete node._generatedUnifiedPrompts;
+					node._generationInProgress = false;
+					delete node._progressState;
+					delete node._generationCount;
 
 					// Hide progress section now that prompts are accepted
 					const progressSection = container.querySelector(".instaraw-rpg-generation-progress");
@@ -3623,6 +3768,9 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 				// === Cancel Generated Prompts ===
 				const cancelGeneratedPrompts = () => {
 					delete node._generatedUnifiedPrompts;
+					node._generationInProgress = false;
+					delete node._progressState;
+					delete node._generationCount;
 
 					// Hide progress section when cancelling
 					const progressSection = container.querySelector(".instaraw-rpg-generation-progress");
