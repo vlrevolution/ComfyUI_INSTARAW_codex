@@ -1603,7 +1603,7 @@ app.registerExtension({
 											<span class="instaraw-rpg-hint-text" style="font-size: 11px; color: #9ca3af;">Uses connected character_image and selected model above</span>
 										</div>
 									` : ''}
-									<details class="instaraw-rpg-advanced-settings" style="margin-top: 12px; padding: 12px; background: #1f2937; border: 1px solid #4b5563; border-radius: 4px;">
+									<details class="instaraw-rpg-advanced-settings" style="padding: 12px; background: #1f2937; border: 1px solid #4b5563; border-radius: 4px;">
 										<summary style="cursor: pointer; font-weight: 500; font-size: 12px; color: #9ca3af; user-select: none;">⚙️ Advanced: Edit System Prompt</summary>
 										<div style="margin-top: 12px;">
 											<textarea class="instaraw-rpg-character-system-prompt instaraw-rpg-prompt-textarea" style="font-family: monospace; font-size: 11px; line-height: 1.5; resize: vertical; width: 100%; overflow-y: hidden;">${escapeHtml(node.properties.character_system_prompt || getCharacterSystemPrompt(node.properties.character_complexity || "balanced"))}</textarea>
@@ -1798,7 +1798,7 @@ app.registerExtension({
 						<!-- Advanced: Edit System Prompt -->
 						<div class="instaraw-rpg-section">
 							<!-- Advanced: Edit System Prompt -->
-							<details class="instaraw-rpg-advanced-settings" style="margin-top: 12px; padding: 12px; background: #1f2937; border: 1px solid #4b5563; border-radius: 4px;">
+							<details class="instaraw-rpg-advanced-settings" style="padding: 12px; background: #1f2937; border: 1px solid #4b5563; border-radius: 4px;">
 								<summary style="cursor: pointer; font-weight: 500; font-size: 12px; color: #9ca3af; user-select: none;">⚙️ Advanced: Edit System Prompt</summary>
 								<div style="margin-top: 12px;">
 									<textarea class="instaraw-rpg-system-prompt instaraw-rpg-prompt-textarea" style="font-family: monospace; font-size: 11px; line-height: 1.5; resize: vertical; width: 100%; overflow-y: hidden;">${escapeHtml(node.properties.creative_system_prompt || (() => {
