@@ -3483,8 +3483,8 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 							// Store generated prompts and update state FIRST (regardless of which tab is active)
 							node._generatedUnifiedPrompts = allGeneratedPrompts;
 							node._generationInProgress = false; // Mark as complete
-							delete node._progressState; // Clear progress state
-							console.log(`[RPG] State updated: ${allGeneratedPrompts.length} prompts stored`);
+							// Keep node._progressState so we can recreate progress items when switching back
+							console.log(`[RPG] State updated: ${allGeneratedPrompts.length} prompts stored, keeping progress state for restore`);
 
 							// Query for FRESH DOM elements (in case user switched tabs during generation)
 							const currentProgressSection = container.querySelector(".instaraw-rpg-generation-progress");
@@ -3553,13 +3553,15 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 						console.error("[RPG] ❌ Error during parallel prompt generation:", error);
 						console.error("[RPG] Error stack:", error.stack);
 
-						// Clear generation state
+						// Clear generation state (but keep progress state for viewing errors)
 						node._generationInProgress = false;
-						delete node._progressState;
-						delete node._generationCount;
+						// Keep progressState to show error details when switching tabs
+						// delete node._progressState;
+						// delete node._generationCount;
 
 						// Hide progress section, show error
-						if (progressSection) progressSection.style.display = "none";
+						const currentProgressSection = container.querySelector(".instaraw-rpg-generation-progress");
+						if (currentProgressSection) currentProgressSection.style.display = "none";
 						alert(`Generation error: ${error.message || error}`);
 
 					} finally {
@@ -3644,6 +3646,39 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 					// If generation completed, restore the preview
 					if (node._generatedUnifiedPrompts) {
 						console.log(`[RPG] Restoring completed generation with ${node._generatedUnifiedPrompts.length} prompts`);
+
+						// Restore progress items if we have the state
+						if (node._progressState && progressItems) {
+							progressItems.innerHTML = "";
+							const generationCount = node._generationCount || node._progressState.length;
+
+							node._progressState.forEach((state, i) => {
+								const progressItem = document.createElement("div");
+								progressItem.className = `instaraw-rpg-progress-item ${state.status}`;
+								progressItem.dataset.index = i;
+
+								const statusMap = {
+									'pending': '⏳ Pending',
+									'in-progress': '⏳ Generating...',
+									'success': '✓ Complete',
+									'error': '✖ Failed',
+									'cancelled': '⏹ Cancelled'
+								};
+
+								progressItem.innerHTML = `
+									<div class="instaraw-rpg-progress-item-header">
+										<span class="instaraw-rpg-progress-item-label">Prompt ${i + 1}/${generationCount}</span>
+										<span class="instaraw-rpg-progress-item-status ${state.status}">${statusMap[state.status] || '⏳ Pending'}</span>
+									</div>
+									<div class="instaraw-rpg-progress-item-bar">
+										<div class="instaraw-rpg-progress-item-fill" style="width: ${state.progress}%"></div>
+									</div>
+									<div class="instaraw-rpg-progress-item-message">${state.message || ''}</div>
+								`;
+								progressItems.appendChild(progressItem);
+							});
+							console.log(`[RPG] Restored ${node._progressState.length} completed progress items`);
+						}
 
 						// Update progress header with completion statistics
 						const progressHeader = progressSection?.querySelector(".instaraw-rpg-progress-header h4");
