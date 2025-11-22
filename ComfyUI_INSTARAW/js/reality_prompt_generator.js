@@ -1159,17 +1159,8 @@ app.registerExtension({
 
 							<div class="instaraw-rpg-library-header">
 								<div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-									<span class="instaraw-rpg-result-count">
-										${showingRandomPrompts
-											? `🎲 Showing ${randomPrompts.length} random prompt${randomPrompts.length === 1 ? '' : 's'}`
-											: `${filteredPrompts.length} prompt${filteredPrompts.length === 1 ? '' : 's'} found${filters.show_bookmarked ? ' (favorites only)' : ''}${totalPages > 1 ? ` • Page ${currentPage + 1} of ${totalPages}` : ''}`
-										}
-									</span>
-									<label class="instaraw-rpg-sdxl-toggle" title="SDXL mode - show tags as main content">
-										<input type="checkbox" class="instaraw-rpg-sdxl-mode-checkbox" ${filters.sdxl_mode ? "checked" : ""} />
-										🎨 SDXL
-									</label>
-									<div style="display: flex; align-items: center; gap: 6px; margin-left: auto;">
+									<!-- Buttons Row -->
+									<div style="display: flex; align-items: center; gap: 6px;">
 										${showingRandomPrompts ? `
 											<!-- Random Mode: Show Add All, Reroll, and Exit buttons -->
 											<button class="instaraw-rpg-btn-primary instaraw-rpg-add-all-random-btn" style="font-size: 12px; padding: 6px 12px;">
@@ -1218,6 +1209,13 @@ app.registerExtension({
 												🎲 Show Random
 											</button>
 										`}
+									</div>
+									<!-- Result Count Row (wraps to new line) -->
+									<div style="flex-basis: 100%; font-size: 12px; color: #9ca3af; margin-top: 4px;">
+										${showingRandomPrompts
+											? `Showing ${randomPrompts.length} random prompts`
+											: `${filteredPrompts.length} prompt${filteredPrompts.length === 1 ? '' : 's'} found${totalPages > 1 ? ` • Page ${currentPage + 1} of ${totalPages}` : ''}`
+										}
 									</div>
 								</div>
 							</div>
@@ -4074,6 +4072,17 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 									shot_type: "portrait"
 								});
 
+								// Reset filters to show user prompts and clear search
+								node.properties.library_filters = JSON.stringify({
+									prompt_source: "user",
+									search_query: "",
+									content_type: "any",
+									safety_level: "any",
+									shot_type: "any",
+									show_bookmarked: false
+								});
+								currentPage = 0; // Go to first page
+
 								// Immediately put it in edit mode
 								editingValues[newPrompt.id] = {
 									positive: "",
@@ -4085,7 +4094,7 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 								};
 								editingPrompts.add(newPrompt.id);
 								renderUI();
-								console.log("[RPG] Created new user prompt in edit mode");
+								console.log("[RPG] Created new user prompt in edit mode, switched to My Prompts view");
 							} catch (error) {
 								console.error("[RPG] Error creating user prompt:", error);
 								alert(`Error creating prompt: ${error.message}`);
