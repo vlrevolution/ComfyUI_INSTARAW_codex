@@ -798,23 +798,29 @@ app.registerExtension({
 
 				const exportUserPrompts = () => {
 					const bookmarks = JSON.parse(node.properties.bookmarks || "[]");
+
+					// Get generated prompts from the batch
+					const promptBatch = parsePromptBatch();
+					const generatedPrompts = promptBatch.filter(p => !p.source_id); // Generated prompts have no source_id
+
 					const exportData = {
 						version: "1.0",
 						exported_at: new Date().toISOString(),
-						prompts: userPrompts,
-						bookmarks: bookmarks
+						user_prompts: userPrompts,
+						bookmarks: bookmarks,  // Just IDs - library prompts shouldn't be duplicated
+						generated_prompts: generatedPrompts
 					};
 					const dataStr = JSON.stringify(exportData, null, 2);
 					const blob = new Blob([dataStr], { type: "application/json" });
 					const url = URL.createObjectURL(blob);
 					const a = document.createElement("a");
 					a.href = url;
-					a.download = `rpg_user_prompts_${Date.now()}.json`;
+					a.download = `rpg_export_${Date.now()}.json`;
 					document.body.appendChild(a);
 					a.click();
 					document.body.removeChild(a);
 					URL.revokeObjectURL(url);
-					console.log(`[RPG] Exported ${userPrompts.length} user prompts and ${bookmarks.length} bookmarks`);
+					console.log(`[RPG] Exported ${userPrompts.length} user prompts, ${bookmarks.length} bookmarks, and ${generatedPrompts.length} generated prompts`);
 				};
 
 				const importUserPrompts = async (file) => {
@@ -823,27 +829,44 @@ app.registerExtension({
 						reader.onload = async (e) => {
 							try {
 								const data = JSON.parse(e.target.result);
-								const imported = data.prompts || [];
+
+								const userPromptsToImport = data.user_prompts || [];
+								const generatedPromptsToImport = data.generated_prompts || [];
 								const importedBookmarks = data.bookmarks || [];
 
 								// Validate format
-								if (!Array.isArray(imported)) {
-									throw new Error("Invalid format: prompts must be an array");
+								if (!Array.isArray(userPromptsToImport)) {
+									throw new Error("Invalid format: user_prompts must be an array");
 								}
 
-								// Merge with existing (avoid duplicates by ID)
+								// Merge user prompts with existing (avoid duplicates by ID)
 								const existingIds = new Set(userPrompts.map(p => p.id));
-								let added = 0;
-								imported.forEach(prompt => {
+								let addedUser = 0;
+								userPromptsToImport.forEach(prompt => {
 									if (!existingIds.has(prompt.id)) {
 										userPrompts.push({
 											...prompt,
 											is_user_created: true,
 											imported_at: Date.now()
 										});
-										added++;
+										existingIds.add(prompt.id);
+										addedUser++;
 									}
 								});
+
+								// Import generated prompts into batch
+								const promptBatch = parsePromptBatch();
+								let addedGenerated = 0;
+								generatedPromptsToImport.forEach(prompt => {
+									promptBatch.push({
+										...prompt,
+										imported_at: Date.now()
+									});
+									addedGenerated++;
+								});
+								if (addedGenerated > 0) {
+									setPromptBatchData(promptBatch);
+								}
 
 								// Merge bookmarks (avoid duplicates)
 								const currentBookmarks = JSON.parse(node.properties.bookmarks || "[]");
@@ -853,8 +876,11 @@ app.registerExtension({
 								await saveUserPrompts(userPrompts);
 								mergeUserPromptsWithLibrary();
 								renderUI();
-								console.log(`[RPG] Imported ${added} new user prompts (${imported.length - added} duplicates skipped) and ${importedBookmarks.length} bookmarks`);
-								resolve({ added, skipped: imported.length - added, bookmarks: importedBookmarks.length });
+
+								const totalAdded = addedUser + addedGenerated;
+								const totalSkipped = userPromptsToImport.length - addedUser;
+								console.log(`[RPG] Imported ${addedUser} user prompts, ${addedGenerated} generated prompts, ${importedBookmarks.length} bookmarks (${totalSkipped} duplicates skipped)`);
+								resolve({ added: totalAdded, skipped: totalSkipped, details: { user: addedUser, generated: addedGenerated, bookmarks: importedBookmarks.length } });
 							} catch (error) {
 								console.error("[RPG] Error importing user prompts:", error);
 								reject(error);
@@ -3153,7 +3179,7 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 									temperature: temperatureValue,
 									top_p: topPValue,
 									force_regenerate: forceRegenerate,
-									mode: detectedMode,
+									generation_mode: detectedMode,  // Fixed: was "mode", backend expects "generation_mode"
 									affect_elements: affectElements,
 									user_input: userInput,
 									generation_style: generationStyle
@@ -3852,10 +3878,17 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 					const exportPromptsBtn = container.querySelector(".instaraw-rpg-export-prompts-btn");
 					if (exportPromptsBtn) {
 						exportPromptsBtn.onclick = () => {
-							if (userPrompts.length === 0) {
-								alert("No user prompts to export");
+							const bookmarks = JSON.parse(node.properties.bookmarks || "[]");
+							const promptBatch = parsePromptBatch();
+							const generatedPrompts = promptBatch.filter(p => !p.source_id);
+
+							const totalToExport = userPrompts.length + bookmarks.length + generatedPrompts.length;
+
+							if (totalToExport === 0) {
+								alert("Nothing to export. Add user prompts, favorite some library prompts, or generate prompts first.");
 								return;
 							}
+
 							exportUserPrompts();
 						};
 					}

@@ -31,6 +31,7 @@ async def generate_with_gemini(system_prompt, user_prompt, model="gemini-2.5-pro
     """
     Generate creative prompts using Google Gemini API.
     Returns a list of {positive, negative, tags} dictionaries.
+    Uses the NEW Google Genai SDK pattern (matching gemini_native.py).
 
     Args:
         images: List of base64-encoded image strings (for vision/img2img mode)
@@ -38,6 +39,7 @@ async def generate_with_gemini(system_prompt, user_prompt, model="gemini-2.5-pro
     try:
         from google import genai
         from google.genai import types
+        import base64
     except ImportError:
         raise ImportError("The 'google-genai' library is required. Run: pip install -U google-genai")
 
@@ -48,54 +50,47 @@ async def generate_with_gemini(system_prompt, user_prompt, model="gemini-2.5-pro
         raise ValueError("Gemini API Key is missing. Provide it in the node or set GEMINI_API_KEY env var.")
 
     try:
-        # Use the async client for non-blocking calls
-        genai.configure(api_key=api_key)
-        async_client = genai.GenerativeModel(model_name=model)
+        # NEW SDK pattern: use Client (matching gemini_native.py)
+        client = genai.Client(api_key=api_key)
 
-        # Configure generation
-        generation_config = types.GenerationConfig(
-            temperature=temperature,
-            top_p=top_p,
-            candidate_count=1,
-        )
-        safety_settings=[
+        # Build parts list (text + optional images)
+        parts = [types.Part.from_text(text=f"{system_prompt}\n\n{user_prompt}")]
+
+        # Add images if provided
+        if images and len(images) > 0:
+            for img_base64 in images:
+                try:
+                    # Decode base64 to bytes
+                    image_bytes = base64.b64decode(img_base64)
+                    parts.append(types.Part.from_bytes(data=image_bytes, mime_type='image/png'))
+                    print(f"[RPG Creative API] Added image to Gemini vision request (base64 length: {len(img_base64)})")
+                except Exception as img_error:
+                    print(f"[RPG Creative API] Failed to decode image: {img_error}")
+
+        contents = [types.Content(role="user", parts=parts)]
+
+        # Safety settings
+        safety_settings = [
             types.SafetySetting(category=cat, threshold="BLOCK_NONE")
             for cat in ["HARM_CATEGORY_HATE_SPEECH", "HARM_CATEGORY_DANGEROUS_CONTENT",
                        "HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_SEXUALLY_EXPLICIT"]
         ]
 
-        # Build content for API call
-        if images and len(images) > 0:
-            # Vision mode: include images with text
-            import base64
-            import PIL.Image
-            import io
+        # Generation config (matching gemini_native.py pattern)
+        config = types.GenerateContentConfig(
+            temperature=temperature,
+            top_p=top_p,
+            candidate_count=1,
+            safety_settings=safety_settings,
+            response_mime_type="application/json"
+        )
 
-            content_parts = [f"{system_prompt}\n\n{user_prompt}"]
-
-            for img_base64 in images:
-                try:
-                    # Decode base64 to image
-                    img_data = base64.b64decode(img_base64)
-                    img = PIL.Image.open(io.BytesIO(img_data))
-                    content_parts.append(img)
-                    print(f"[RPG Creative API] Added image to Gemini vision request: {img.size}")
-                except Exception as img_error:
-                    print(f"[RPG Creative API] Failed to decode image: {img_error}")
-                    # Continue without this image
-
-            response = await async_client.generate_content_async(
-                content_parts,
-                generation_config=generation_config,
-                safety_settings=safety_settings
-            )
-        else:
-            # Text-only mode
-            response = await async_client.generate_content_async(
-                f"{system_prompt}\n\n{user_prompt}",
-                generation_config=generation_config,
-                safety_settings=safety_settings
-            )
+        # Call API (synchronous call, but wrapped in async function)
+        response = client.models.generate_content(
+            model=f"models/{model}",
+            contents=contents,
+            config=config
+        )
 
         if not response.candidates:
             raise Exception("Gemini returned no candidates (likely blocked by safety filters)")
