@@ -1296,6 +1296,9 @@ app.registerExtension({
 													<span class="instaraw-rpg-id-badge" title="Prompt ID: ${prompt.id}">ID: ${prompt.id.substring(0, 8)}..</span>
 													<button class="instaraw-rpg-id-copy-btn" data-id="${prompt.id}" title="Copy full ID">📄</button>
 												</div>
+												<div class="instaraw-rpg-id-badge-container" style="margin-left: auto;">
+													<button class="instaraw-rpg-copy-prompt-btn" data-positive="${escapeHtml(positive)}" title="Copy positive prompt">📋</button>
+												</div>
 											</div>
 
 											${prompt.is_user_created ? `
@@ -4422,6 +4425,30 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 							const promptId = select.dataset.id;
 							if (editingValues[promptId]) {
 								editingValues[promptId].shot_type = select.value;
+							}
+						};
+					});
+
+					// Copy prompt buttons
+					container.querySelectorAll(".instaraw-rpg-copy-prompt-btn").forEach((btn) => {
+						btn.onclick = async (e) => {
+							e.stopPropagation();
+							const positivePrompt = btn.dataset.positive;
+							if (!positivePrompt) return;
+
+							try {
+								await navigator.clipboard.writeText(positivePrompt);
+								// Show success feedback
+								const originalText = btn.textContent;
+								btn.textContent = "✅";
+								btn.style.opacity = "1";
+								setTimeout(() => {
+									btn.textContent = originalText;
+									btn.style.opacity = "";
+								}, 800);
+							} catch (error) {
+								console.error("[RPG] Failed to copy to clipboard:", error);
+								alert("Failed to copy to clipboard");
 							}
 						};
 					});

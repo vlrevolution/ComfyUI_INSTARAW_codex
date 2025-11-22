@@ -1194,6 +1194,22 @@
 	background: rgba(255, 255, 255, 0.1);
 }
 
+.instaraw-rpg-copy-prompt-btn {
+	background: none;
+	border: none;
+	padding: 2px 2px;
+	cursor: pointer;
+	font-size: 11px;
+	opacity: 0.6;
+	transition: opacity 0.2s;
+	border-radius: 2px;
+}
+
+.instaraw-rpg-copy-prompt-btn:hover {
+	opacity: 1;
+	background: rgba(255, 255, 255, 0.1);
+}
+
 .instaraw-rpg-source-badge.from-library {
 	background: rgba(59, 130, 246, 0.2);
 	color: #60a5fa;
