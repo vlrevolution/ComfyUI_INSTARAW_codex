@@ -3164,6 +3164,42 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 									payload.images = [imageBase64];
 								}
 
+								// 🔍 DETAILED LOGGING: Preview the complete request
+								console.group(`[RPG] 🔍 REQUEST PREVIEW [${i + 1}/${generationCount}]`);
+								console.log(`📋 Mode: ${detectedMode} | Style: ${generationStyle} | Model: ${model}`);
+								console.log(`\n━━━ SYSTEM PROMPT ━━━\n${dynamicSystemPrompt}\n━━━━━━━━━━━━━━━━━━━━`);
+
+								if (userInput) {
+									console.log(`\n💬 User Input: "${userInput}"`);
+								}
+
+								if (useCharacter && characterDescription) {
+									console.log(`\n👤 Character Reference: "${characterDescription}"`);
+								}
+
+								if (thisPromptSources.length > 0) {
+									console.log(`\n📚 Source Prompts (${thisPromptSources.length}):`);
+									thisPromptSources.forEach((sp, idx) => {
+										console.log(`  [${idx + 1}] POS: ${sp.positive_prompt.substring(0, 100)}${sp.positive_prompt.length > 100 ? '...' : ''}`);
+									});
+								}
+
+								if (isImg2Img && uniqueImages[i]) {
+									console.log(`\n🖼️ Input Image:`);
+									console.log(`  URL: ${uniqueImages[i].url}`);
+									console.log(`  Repeat Count: ${uniqueImages[i].repeat_count || 1}`);
+									console.log(`  Base64 Length: ${imageBase64?.length || 0} chars`);
+									// Display the image in console (works in browser dev tools)
+									console.log(`  Preview:`, uniqueImages[i].url);
+								}
+
+								if (affectElements && affectElements.length > 0) {
+									console.log(`\n🎨 Affect Elements: ${affectElements.join(', ')}`);
+								}
+
+								console.log(`\n⚙️ Model Settings: Temp=${temperatureValue}, Top-P=${topPValue}, SDXL=${isSDXL}`);
+								console.groupEnd();
+
 								// Retry logic
 								const maxRetries = 3;
 								let retryCount = 0;
@@ -3267,6 +3303,18 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 											} else {
 												promptResult = rawPrompt;
 											}
+
+											// 🔍 DETAILED LOGGING: Preview the response
+											console.group(`[RPG] ✅ RESPONSE RECEIVED [${i + 1}/${generationCount}]`);
+											console.log(`\n━━━ RAW API RESPONSE ━━━\n${typeof rawPrompt === 'string' ? rawPrompt : JSON.stringify(rawPrompt, null, 2)}\n━━━━━━━━━━━━━━━━━━━━━━`);
+											console.log(`\n━━━ PARSED RESULT ━━━`);
+											console.log(`POSITIVE: ${promptResult.positive?.substring(0, 200)}${promptResult.positive?.length > 200 ? '...' : ''}`);
+											console.log(`NEGATIVE: ${promptResult.negative || '(none)'}`);
+											console.log(`CONTENT_TYPE: ${promptResult.classification?.content_type || 'N/A'}`);
+											console.log(`SAFETY_LEVEL: ${promptResult.classification?.safety_level || 'N/A'}`);
+											console.log(`SHOT_TYPE: ${promptResult.classification?.shot_type || 'N/A'}`);
+											console.log(`TAGS: ${promptResult.tags?.join(', ') || '(none)'}`);
+											console.groupEnd();
 
 											success = true;
 										} else {

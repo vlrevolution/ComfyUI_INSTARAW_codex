@@ -110,10 +110,13 @@ async def generate_with_gemini(system_prompt, user_prompt, model="gemini-2.5-pro
 
 
 # === Grok Integration ===
-async def generate_with_grok(system_prompt, user_prompt, model="grok-4", api_key=None, temperature=0.9, top_p=0.9):
+async def generate_with_grok(system_prompt, user_prompt, model="grok-4", api_key=None, temperature=0.9, top_p=0.9, images=None):
 	"""
 	Generate creative prompts using xAI Grok API.
 	Returns a list of {positive, negative, tags} dictionaries.
+
+	Args:
+		images: List of base64-encoded image strings (for vision/img2img mode)
 	"""
 	# Use provided API key or fall back to environment variable
 	if not api_key or api_key.strip() == "":
@@ -125,11 +128,34 @@ async def generate_with_grok(system_prompt, user_prompt, model="grok-4", api_key
 		base_url = os.environ.get("XAI_API_BASE", "https://api.x.ai")
 		url = f"{base_url.rstrip('/')}/v1/chat/completions"
 
+		# Build user message content (text + optional images)
+		if images and len(images) > 0:
+			# Vision mode: multimodal content array
+			user_content = [
+				{"type": "text", "text": user_prompt}
+			]
+
+			for img_base64 in images:
+				try:
+					# Grok vision API expects base64 images in this format
+					user_content.append({
+						"type": "image_url",
+						"image_url": {
+							"url": f"data:image/png;base64,{img_base64}"
+						}
+					})
+					print(f"[RPG Creative API] Added image to Grok vision request (base64 length: {len(img_base64)})")
+				except Exception as img_error:
+					print(f"[RPG Creative API] Failed to add image to Grok request: {img_error}")
+		else:
+			# Text-only mode
+			user_content = user_prompt
+
 		payload = {
             "model": model,
             "messages": [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
+                {"role": "user", "content": user_content},
             ],
             "temperature": temperature,
             "top_p": top_p,
@@ -468,11 +494,13 @@ async def _generate_creative_prompts(request):
             print(f"[RPG Creative API] Affecting elements: {affect_elements}")
         if generation_mode == "txt2img":
             print(f"[RPG Creative API] Inspiration prompts: {len(random_inspiration_prompts)}, User input: {len(user_text_input)} chars")
+        if images and len(images) > 0:
+            print(f"[RPG Creative API] 🖼️ Processing {len(images)} image(s) for vision mode - First image base64 length: {len(images[0])} chars")
 
         if model.startswith("gemini"):
             prompts = await generate_with_gemini(system_prompt, user_prompt, model, gemini_api_key, temperature, top_p, images=images)
         elif model.startswith("grok"):
-            prompts = await generate_with_grok(system_prompt, user_prompt, model, grok_api_key, temperature, top_p)
+            prompts = await generate_with_grok(system_prompt, user_prompt, model, grok_api_key, temperature, top_p, images=images)
         else:
             raise ValueError(f"Unsupported model: {model}")
 
