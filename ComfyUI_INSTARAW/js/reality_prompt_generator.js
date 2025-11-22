@@ -301,6 +301,10 @@ app.registerExtension({
 				const editingPrompts = new Set(); // Track which prompt IDs are in edit mode
 				const editingValues = {}; // Store temporary edit values
 
+				// Selection mode state (for multi-select delete)
+				let selectionMode = false;
+				const selectedPrompts = new Set(); // Track which prompt IDs are selected
+
 				// Container setup (exact AIL pattern)
 				const container = document.createElement("div");
 				container.className = "instaraw-rpg-container";
@@ -576,6 +580,7 @@ app.registerExtension({
 
 						// Load user prompts and merge
 						await loadUserPrompts();
+						await loadGeneratedPrompts();
 						mergeUserPromptsWithLibrary();
 
 						isDatabaseLoading = false;
@@ -755,6 +760,15 @@ app.registerExtension({
 					const filtered = userPrompts.filter(p => p.id !== id);
 					if (filtered.length !== userPrompts.length) {
 						await saveUserPrompts(filtered);
+
+						// Clean up bookmarks if this prompt was favorited
+						const bookmarks = JSON.parse(node.properties.bookmarks || "[]");
+						const updatedBookmarks = bookmarks.filter(b => b !== id);
+						if (updatedBookmarks.length !== bookmarks.length) {
+							node.properties.bookmarks = JSON.stringify(updatedBookmarks);
+							console.log(`[RPG] Removed deleted prompt ${id} from bookmarks`);
+						}
+
 						mergeUserPromptsWithLibrary();
 						renderUI();
 						return true;
@@ -794,6 +808,26 @@ app.registerExtension({
 				const userCount = promptsDatabase.filter(x => x.is_user_created).length;
 				promptsDatabase.splice(userCount, 0, ...generatedPrompts);
 				return p;
+			};
+
+			const deleteGeneratedPrompt = async (id) => {
+				const filtered = generatedPrompts.filter(p => p.id !== id);
+				if (filtered.length !== generatedPrompts.length) {
+					await saveGeneratedPrompts(filtered);
+
+					// Clean up bookmarks if this prompt was favorited
+					const bookmarks = JSON.parse(node.properties.bookmarks || "[]");
+					const updatedBookmarks = bookmarks.filter(b => b !== id);
+					if (updatedBookmarks.length !== bookmarks.length) {
+						node.properties.bookmarks = JSON.stringify(updatedBookmarks);
+						console.log(`[RPG] Removed deleted prompt ${id} from bookmarks`);
+					}
+
+					mergeUserPromptsWithLibrary();
+					renderUI();
+					return true;
+				}
+				return false;
 			};
 
 				const exportUserPrompts = () => {
@@ -892,11 +926,11 @@ app.registerExtension({
 				};
 
 				const mergeUserPromptsWithLibrary = () => {
-					// Remove old user prompts from promptsDatabase
-					promptsDatabase = promptsDatabase.filter(p => !p.is_user_created);
-					// Add current user prompts to the beginning
-					promptsDatabase = [...userPrompts, ...promptsDatabase];
-					console.log(`[RPG] Merged database: ${userPrompts.length} user + ${promptsDatabase.length - userPrompts.length} library = ${promptsDatabase.length} total`);
+					// Remove old user prompts and generated prompts from promptsDatabase
+					promptsDatabase = promptsDatabase.filter(p => !p.is_user_created && !p.is_ai_generated);
+					// Add prompts in order: user prompts, generated prompts, library prompts
+					promptsDatabase = [...userPrompts, ...generatedPrompts, ...promptsDatabase];
+					console.log(`[RPG] Merged database: ${userPrompts.length} user + ${generatedPrompts.length} generated + ${promptsDatabase.length - userPrompts.length - generatedPrompts.length} library = ${promptsDatabase.length} total`);
 				};
 
 				// === Main Render Function ===
@@ -1142,8 +1176,22 @@ app.registerExtension({
 											<button class="instaraw-rpg-btn-secondary instaraw-rpg-exit-random-btn" style="font-size: 12px; padding: 6px 12px;">
 												← Back to Library
 											</button>
+										` : selectionMode ? `
+											<!-- Selection Mode: Show Select All, Delete, and Cancel buttons -->
+											<button class="instaraw-rpg-btn-secondary instaraw-rpg-select-all-btn" style="font-size: 12px; padding: 6px 12px;">
+												☑ Select All
+											</button>
+											<button class="instaraw-rpg-btn-secondary instaraw-rpg-deselect-all-btn" style="font-size: 12px; padding: 6px 12px;">
+												☐ Deselect All
+											</button>
+											<button class="instaraw-rpg-btn-primary instaraw-rpg-delete-selected-btn" style="font-size: 12px; padding: 6px 12px; background: #dc2626;" ${selectedPrompts.size === 0 ? 'disabled' : ''}>
+												🗑️ Delete Selected (${selectedPrompts.size})
+											</button>
+											<button class="instaraw-rpg-btn-secondary instaraw-rpg-cancel-selection-btn" style="font-size: 12px; padding: 6px 12px;">
+												✖ Cancel
+											</button>
 										` : `
-											<!-- Normal Mode: Show Create/Import/Export and Random controls -->
+											<!-- Normal Mode: Show Create/Import/Export, Select, and Random controls -->
 											<button class="instaraw-rpg-btn-secondary instaraw-rpg-create-prompt-btn" style="font-size: 12px; padding: 6px 12px;" title="Create new custom prompt">
 												➕ Create
 											</button>
@@ -1153,6 +1201,11 @@ app.registerExtension({
 											<button class="instaraw-rpg-btn-secondary instaraw-rpg-export-prompts-btn" style="font-size: 12px; padding: 6px 12px;" title="Export my prompts and bookmarks to JSON file" ${userPrompts.length === 0 && bookmarks.length === 0 ? 'disabled' : ''}>
 												💾 Export (${userPrompts.length + bookmarks.length})
 											</button>
+											${(filters.prompt_source === 'user' || filters.prompt_source === 'generated') ? `
+												<button class="instaraw-rpg-btn-secondary instaraw-rpg-enter-selection-btn" style="font-size: 12px; padding: 6px 12px;" title="Select multiple prompts to delete">
+													☑ Select
+												</button>
+											` : ''}
 											<div style="width: 1px; height: 20px; background: #4b5563; margin: 0 4px;"></div>
 											<label style="font-size: 11px; color: #9ca3af; margin-right: 4px;">Random:</label>
 											<input type="number" class="instaraw-rpg-random-count-input" value="${randomCount}" min="1" max="50" style="width: 50px; padding: 4px 6px; border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(255, 255, 255, 0.05); color: #f9fafb; border-radius: 4px; font-size: 12px;" title="How many random prompts to show (uses current filters)" />
@@ -1209,14 +1262,19 @@ app.registerExtension({
 														const sdxlMode = filters.sdxl_mode || false;
 														const matchType = prompt._matchType;
 														const matchBadge = matchType === 'both' ? '📝🏷️' : matchType === 'prompt' ? '📝' : matchType === 'tags' ? '🏷️' : '';
-														const sourceBadge = prompt.is_user_created ? '✏️ My Prompt' : '📚 Library';
+														const sourceBadge = prompt.is_user_created ? '✏️ My Prompt' : prompt.is_ai_generated ? '✨ AI Generated' : '📚 Library';
 
 														const allTags = prompt.tags || [];
 														const autoExpand = matchType === 'tags' || matchType === 'both'; // Auto-expand if tags match
 
 														return `
-									<div class="instaraw-rpg-library-card ${batchCount > 0 ? 'in-batch' : ''} ${prompt.is_user_created ? 'user-prompt' : ''}" data-id="${prompt.id}" data-is-user="${prompt.is_user_created ? 'true' : 'false'}">
+									<div class="instaraw-rpg-library-card ${batchCount > 0 ? 'in-batch' : ''} ${prompt.is_user_created ? 'user-prompt' : ''} ${selectionMode ? 'selection-mode' : ''}" data-id="${prompt.id}" data-is-user="${prompt.is_user_created ? 'true' : 'false'}">
 										<div class="instaraw-rpg-library-card-header">
+											${selectionMode && (prompt.is_user_created || prompt.is_ai_generated) ? `
+												<label class="instaraw-rpg-selection-checkbox" style="display: flex; align-items: center; margin-right: 8px; cursor: pointer;">
+													<input type="checkbox" class="instaraw-rpg-prompt-checkbox" data-id="${prompt.id}" ${selectedPrompts.has(prompt.id) ? 'checked' : ''} style="cursor: pointer; width: 18px; height: 18px;" />
+												</label>
+											` : ''}
 											<button class="instaraw-rpg-bookmark-btn ${bookmarks.includes(prompt.id) ? "bookmarked" : ""}" data-id="${prompt.id}">
 												${bookmarks.includes(prompt.id) ? "⭐" : "☆"}
 											</button>
@@ -1224,11 +1282,12 @@ app.registerExtension({
 												<button class="instaraw-rpg-add-to-batch-btn" data-id="${prompt.id}">+ Add</button>
 												${batchCount > 0 ? `<button class="instaraw-rpg-undo-batch-btn" data-id="${prompt.id}">↶ ${batchCount}</button>` : ''}
 												${prompt.is_user_created ? `<button class="instaraw-rpg-delete-user-prompt-btn" data-id="${prompt.id}" title="Delete this prompt">🗑️</button>` : ''}
+												${prompt.is_ai_generated ? `<button class="instaraw-rpg-delete-generated-prompt-btn" data-id="${prompt.id}" title="Delete this generated prompt">🗑️</button>` : ''}
 											</div>
 										</div>
 										<div class="instaraw-rpg-library-card-content">
 											<div style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; align-items: center;">
-												<div class="instaraw-rpg-source-badge ${prompt.is_user_created ? 'user' : 'library'}">${sourceBadge}</div>
+												<div class="instaraw-rpg-source-badge ${prompt.is_user_created ? 'user' : prompt.is_ai_generated ? 'generated' : 'library'}">${sourceBadge}</div>
 												${matchBadge ? `<div class="instaraw-rpg-match-badge">${matchBadge} Match</div>` : ''}
 												<div class="instaraw-rpg-id-badge-container">
 													<span class="instaraw-rpg-id-badge" title="Prompt ID: ${prompt.id}">ID: ${prompt.id.substring(0, 8)}..</span>
@@ -3893,6 +3952,122 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 						};
 					}
 
+					// Enter selection mode button
+					const enterSelectionBtn = container.querySelector(".instaraw-rpg-enter-selection-btn");
+					if (enterSelectionBtn) {
+						enterSelectionBtn.onclick = () => {
+							selectionMode = true;
+							selectedPrompts.clear();
+							renderUI();
+							console.log("[RPG] Entered selection mode");
+						};
+					}
+
+					// Cancel selection mode button
+					const cancelSelectionBtn = container.querySelector(".instaraw-rpg-cancel-selection-btn");
+					if (cancelSelectionBtn) {
+						cancelSelectionBtn.onclick = () => {
+							selectionMode = false;
+							selectedPrompts.clear();
+							renderUI();
+							console.log("[RPG] Exited selection mode");
+						};
+					}
+
+					// Select all button
+					const selectAllBtn = container.querySelector(".instaraw-rpg-select-all-btn");
+					if (selectAllBtn) {
+						selectAllBtn.onclick = () => {
+							// Add all prompts currently visible (recompute to ensure we have current state)
+							const currentFilters = JSON.parse(node.properties.library_filters || "{}");
+							const currentPrompts = showingRandomPrompts ? randomPrompts : filterPrompts(promptsDatabase, currentFilters);
+							const page = node.properties.current_page || 0;
+							const pagePrompts = currentPrompts.slice(page * itemsPerPage, (page + 1) * itemsPerPage);
+
+							pagePrompts.forEach(prompt => {
+								// Only allow selecting user prompts and generated prompts (not library prompts)
+								if (prompt.is_user_created || prompt.is_ai_generated) {
+									selectedPrompts.add(prompt.id);
+								}
+							});
+							renderUI();
+							console.log(`[RPG] Select All clicked: ${selectedPrompts.size} total selected`);
+						};
+					}
+
+					// Deselect all button
+					const deselectAllBtn = container.querySelector(".instaraw-rpg-deselect-all-btn");
+					if (deselectAllBtn) {
+						deselectAllBtn.onclick = () => {
+							console.log(`[RPG] Deselect All clicked: clearing ${selectedPrompts.size} selections`);
+							selectedPrompts.clear();
+							renderUI();
+						};
+					}
+
+					// Delete selected button
+					const deleteSelectedBtn = container.querySelector(".instaraw-rpg-delete-selected-btn");
+					if (deleteSelectedBtn) {
+						deleteSelectedBtn.onclick = async () => {
+							if (selectedPrompts.size === 0) return;
+
+							const confirmMsg = `Delete ${selectedPrompts.size} selected prompt${selectedPrompts.size === 1 ? '' : 's'}?\n\nThis cannot be undone.`;
+							if (!confirm(confirmMsg)) return;
+
+							try {
+								// Separate into user prompts and generated prompts
+								const selectedIds = Array.from(selectedPrompts);
+								let deletedCount = 0;
+
+								for (const promptId of selectedIds) {
+									// Try to delete as user prompt first
+									const userPrompt = userPrompts.find(p => p.id === promptId);
+									if (userPrompt) {
+										await deleteUserPrompt(promptId);
+										deletedCount++;
+										continue;
+									}
+
+									// Try to delete as generated prompt
+									const genPrompt = generatedPrompts.find(p => p.id === promptId);
+									if (genPrompt) {
+										await deleteGeneratedPrompt(promptId);
+										deletedCount++;
+									}
+								}
+
+								console.log(`[RPG] Deleted ${deletedCount} prompts`);
+
+								// Exit selection mode
+								selectionMode = false;
+								selectedPrompts.clear();
+								renderUI();
+
+								alert(`Successfully deleted ${deletedCount} prompt${deletedCount === 1 ? '' : 's'}`);
+							} catch (error) {
+								console.error("[RPG] Error deleting selected prompts:", error);
+								alert(`Error deleting prompts: ${error.message}`);
+							}
+						};
+					}
+
+					// Prompt checkbox handlers
+					container.querySelectorAll(".instaraw-rpg-prompt-checkbox").forEach((checkbox) => {
+						checkbox.onchange = (e) => {
+							e.stopPropagation();
+							const promptId = checkbox.dataset.id;
+
+							if (checkbox.checked) {
+								selectedPrompts.add(promptId);
+							} else {
+								selectedPrompts.delete(promptId);
+							}
+
+							renderUI();
+							console.log(`[RPG] ${checkbox.checked ? 'Selected' : 'Deselected'} prompt ${promptId}. Total selected: ${selectedPrompts.size}`);
+						};
+					});
+
 					// Delete user prompt buttons
 					container.querySelectorAll(".instaraw-rpg-delete-user-prompt-btn").forEach((btn) => {
 						btn.onclick = async (e) => {
@@ -3917,6 +4092,35 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 								renderUI();
 							} catch (error) {
 								console.error("[RPG] Error deleting user prompt:", error);
+								alert(`Error deleting prompt: ${error.message}`);
+							}
+						};
+					});
+
+					// Delete generated prompt buttons
+					container.querySelectorAll(".instaraw-rpg-delete-generated-prompt-btn").forEach((btn) => {
+						btn.onclick = async (e) => {
+							e.stopPropagation();
+							const promptId = btn.dataset.id;
+							const prompt = generatedPrompts.find(p => p.id === promptId);
+							if (!prompt) return;
+
+							const confirmMsg = `Delete this generated prompt?\n\nPositive: ${(prompt.prompt?.positive || '').substring(0, 100)}...`;
+							if (!confirm(confirmMsg)) return;
+
+							try {
+								await deleteGeneratedPrompt(promptId);
+								console.log(`[RPG] Deleted generated prompt ${promptId}`);
+
+								// If in random mode, remove from randomPrompts array
+								if (showingRandomPrompts) {
+									randomPrompts = randomPrompts.filter(p => p.id !== promptId);
+								}
+
+								// Refresh UI
+								renderUI();
+							} catch (error) {
+								console.error("[RPG] Error deleting generated prompt:", error);
 								alert(`Error deleting prompt: ${error.message}`);
 							}
 						};
