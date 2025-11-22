@@ -7,7 +7,7 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
-// System prompt template with placeholders
+// System prompt template with placeholders (TXT2IMG)
 const DEFAULT_RPG_SYSTEM_PROMPT = `You are a Visual Prompt Architect specializing in photorealistic Stable Diffusion prompts.
 
 # YOUR GOLD STANDARD TRAINING DATA
@@ -44,11 +44,88 @@ TAGS: [SDXL comma-separated tags, MAX 50 words, using source vocabulary]
 - Your output must be INDISTINGUISHABLE from the source prompts
 - Focus 222%. Make the masters proud.`;
 
+// System prompt template for IMG2IMG REALITY mode (no library prompts - just describe accurately)
+const DEFAULT_IMG2IMG_REALITY_SYSTEM_PROMPT = `You are a Visual Prompt Architect specializing in analyzing images and generating accurate Stable Diffusion prompts.
+
+# YOUR TASK: ACCURATE IMAGE DESCRIPTION
+You will receive an input image. Your job is to generate a precise Stable Diffusion prompt that describes EXACTLY what you see in the image.
+
+# GENERATION MODE: REALITY (ACCURATE DESCRIPTION)
+
+{MODE_RULES}
+
+# TASK INSTRUCTIONS
+{TASK_INSTRUCTIONS}
+
+# OUTPUT FORMAT (EXACT)
+POSITIVE: [Your generated prompt, 150-300 words, describing the image precisely]
+NEGATIVE: [List quality issues to avoid - blurry, distorted, artifacts, etc.]
+CONTENT_TYPE: person|landscape|architecture|object|animal|abstract|other
+SAFETY_LEVEL: sfw|suggestive|nsfw
+SHOT_TYPE: portrait|full_body|close_up|wide_angle|other
+TAGS: [SDXL comma-separated tags, MAX 50 words]
+
+# CRITICAL
+- Use EXACT prefixes (POSITIVE:, NEGATIVE:, etc.)
+- ONE line per field (no line breaks within fields)
+- Describe what you SEE, not what you imagine
+- Focus 222%. Precision is everything.`;
+
+// System prompt template for IMG2IMG CREATIVE mode (with library prompts for style transfer)
+const DEFAULT_IMG2IMG_CREATIVE_SYSTEM_PROMPT = `You are a Visual Prompt Architect specializing in analyzing images and transforming them using library-inspired styling.
+
+# YOUR REFERENCE LIBRARY (STYLE GUIDE)
+Below are {SOURCE_COUNT} REAL prompts from a curated library. These demonstrate the target style and vocabulary:
+
+{SOURCE_PROMPTS}
+
+# ANALYSIS PHASE
+Study the source prompts above to understand:
+- VOCABULARY: Technical terms, lighting descriptors, camera details they use
+- STYLE PATTERNS: How they describe subjects, settings, composition
+- AUTHENTICITY MARKERS: "authentic", "candid", "professional", etc.
+- TECHNICAL DEPTH: Camera settings, lighting terminology, quality descriptors
+
+# YOUR TASK: IMAGE ANALYSIS & STYLE TRANSFORMATION
+You will receive an input image. Your job is to transform it into a prompt that matches the library's style and vocabulary while preserving the image's core composition.
+
+# GENERATION MODE: CREATIVE (STYLE TRANSFER)
+
+{MODE_RULES}
+
+# TASK INSTRUCTIONS
+{TASK_INSTRUCTIONS}
+
+# OUTPUT FORMAT (EXACT)
+POSITIVE: [Your generated prompt, 150-300 words, transforming the image with library style]
+NEGATIVE: [Learn from source negatives - list quality issues to avoid]
+CONTENT_TYPE: person|landscape|architecture|object|animal|abstract|other
+SAFETY_LEVEL: sfw|suggestive|nsfw
+SHOT_TYPE: portrait|full_body|close_up|wide_angle|other
+TAGS: [SDXL comma-separated tags, MAX 50 words, using source vocabulary]
+
+# CRITICAL
+- Use EXACT prefixes (POSITIVE:, NEGATIVE:, etc.)
+- ONE line per field (no line breaks within fields)
+- Transform the image using library patterns while maintaining core composition
+- Focus 222%. Precision is everything.`;
+
 // Replace placeholders in system prompt with actual values
-const buildSystemPrompt = (mode, generationStyle, sourcePrompts, userInput, characterReference, customTemplate) => {
-	const template = customTemplate || DEFAULT_RPG_SYSTEM_PROMPT;
+const buildSystemPrompt = (mode, generationStyle, sourcePrompts, userInput, characterReference, affectElements, customTemplate) => {
 	const isReality = generationStyle === "reality";
 	const isTxt2Img = mode === "txt2img";
+	const affectElementsArray = affectElements || [];
+
+	// Select appropriate default template based on mode AND generation style
+	let defaultTemplate;
+	if (isTxt2Img) {
+		// txt2img: both Reality and Creative use same template (with library prompts)
+		defaultTemplate = DEFAULT_RPG_SYSTEM_PROMPT;
+	} else {
+		// img2img: different templates for Reality vs Creative
+		defaultTemplate = isReality ? DEFAULT_IMG2IMG_REALITY_SYSTEM_PROMPT : DEFAULT_IMG2IMG_CREATIVE_SYSTEM_PROMPT;
+	}
+	const template = customTemplate || defaultTemplate;
 
 	// Format source prompts
 	const sourcePromptsText = sourcePrompts.map((sp, idx) =>
@@ -56,20 +133,40 @@ const buildSystemPrompt = (mode, generationStyle, sourcePrompts, userInput, char
 	).join("\n\n");
 
 	// Mode-specific rules
-	const modeRules = isReality
-		? `**REALITY MODE RULES:**
+	let modeRules = "";
+
+	if (isTxt2Img) {
+		// TXT2IMG mode rules
+		modeRules = isReality
+			? `**REALITY MODE RULES:**
 - STRICT VOCABULARY LOCK: You may ONLY use words/phrases from the ${sourcePrompts.length} source prompts above
 - NO external vocabulary - if a word isn't in the sources, you can't use it
 - Recombine and rearrange source elements to create new scenes
 - If sources say "An authentic iPhone mirror selfie", you must use this EXACT phrasing
 - Think: Perfect mimicry, forensic precision`
-		: `**CREATIVE MODE RULES:**
+			: `**CREATIVE MODE RULES:**
 - Use sources as style foundation - match their authenticity level and technical precision
 - You MAY introduce new concepts, but maintain source patterns:
   - If sources start with "An authentic...", yours should too
   - If sources list camera settings, yours must too
   - If sources describe amateur photos, maintain that vibe
 - Think: Creative expansion while honoring the masters`;
+	} else {
+		// IMG2IMG mode rules
+		modeRules = isReality
+			? `**REALITY MODE RULES (IMG2IMG):**
+- DESCRIBE THE IMAGE ACCURATELY AND PRECISELY
+- Capture exactly what you see: subject, pose, clothing, background, lighting, composition
+- Use clear, descriptive language appropriate for Stable Diffusion prompts
+- Don't invent details not present in the image
+- Think: Forensic accuracy, detailed observation, pure description`
+			: `**CREATIVE MODE RULES (IMG2IMG):**
+- Transform the image using vocabulary and style patterns from the ${sourcePrompts.length} source prompts above
+- Learn the aesthetic and technical vocabulary from source prompts
+- Maintain the core composition while applying library-inspired styling
+- Match source authenticity level (e.g., if sources are "authentic iPhone selfies", frame your prompt similarly)
+- Think: Style transfer while preserving image essence`;
+	}
 
 	// Task instructions with character integration
 	let taskInstructions = "";
@@ -85,15 +182,23 @@ const buildSystemPrompt = (mode, generationStyle, sourcePrompts, userInput, char
 			taskInstructions += "Create a scene that could naturally exist in the source library";
 		}
 	} else {
-		taskInstructions = "Transform the existing image by modifying specific elements while maintaining the original's essence.\n";
+		// IMG2IMG task instructions
+		taskInstructions = "Analyze the input image and generate a Stable Diffusion prompt that describes it.\n";
+
+		// Character replacement for img2img
 		if (characterReference) {
-			taskInstructions += `\n**CHARACTER REFERENCE:**\nMaintain this character: "${characterReference}"`;
+			taskInstructions += `\n**CHARACTER REPLACEMENT (MANDATORY):**\nThe subject in the image is a person. Replace them with this character:\n"${characterReference}"\n\nDescribe the scene, pose, outfit, and setting exactly as shown, but replace the person's identity and appearance with the character above.`;
 		}
+
+		// Affect elements
+		if (affectElementsArray.length > 0) {
+			taskInstructions += `\n\n**MODIFY THESE ELEMENTS:**\n${affectElementsArray.map(e => `- ${e.charAt(0).toUpperCase() + e.slice(1)}: Transform/reimagine this element`).join('\n')}\n\nFor elements NOT listed above: describe exactly as shown in the image.`;
+		} else if (!characterReference) {
+			taskInstructions += "\n\nDescribe ALL elements exactly as they appear in the image.";
+		}
+
 		if (userInput) {
-			taskInstructions += `\nUser guidance: "${userInput}"`;
-		}
-		if (!userInput && !characterReference) {
-			taskInstructions += "Focus on subtle transformations";
+			taskInstructions += `\n\nAdditional guidance: "${userInput}"`;
 		}
 	}
 
@@ -101,7 +206,7 @@ const buildSystemPrompt = (mode, generationStyle, sourcePrompts, userInput, char
 	return template
 		.replace(/{SOURCE_COUNT}/g, sourcePrompts.length.toString())
 		.replace(/{SOURCE_PROMPTS}/g, sourcePromptsText)
-		.replace(/{GENERATION_MODE}/g, isReality ? "REALITY (STRICT REMIX)" : "CREATIVE (INSPIRED REMIX)")
+		.replace(/{GENERATION_MODE}/g, isReality ? (isTxt2Img ? "REALITY (STRICT REMIX)" : "REALITY (ACCURATE DESCRIPTION)") : "CREATIVE (INSPIRED REMIX)")
 		.replace(/{MODE_RULES}/g, modeRules)
 		.replace(/{TASK_TYPE}/g, isTxt2Img ? "TXT2IMG GENERATION" : "IMG2IMG TRANSFORMATION")
 		.replace(/{TASK_INSTRUCTIONS}/g, taskInstructions);
@@ -502,6 +607,27 @@ app.registerExtension({
 					textarea.style.height = `${textarea.scrollHeight}px`;
 					// Trigger height sync after resize
 					setTimeout(() => updateCachedHeight(), 50);
+				};
+
+				// Convert image URL to base64 (for img2img vision API)
+				const imageUrlToBase64 = async (url) => {
+					try {
+						const response = await fetch(url);
+						const blob = await response.blob();
+						return new Promise((resolve, reject) => {
+							const reader = new FileReader();
+							reader.onloadend = () => {
+								// Remove data:image/...;base64, prefix
+								const base64 = reader.result.split(',')[1];
+								resolve(base64);
+							};
+							reader.onerror = reject;
+							reader.readAsDataURL(blob);
+						});
+					} catch (error) {
+						console.error("[RPG] Error converting image to base64:", error);
+						throw error;
+					}
 				};
 
 				const parseJSONResponse = async (response) => {
@@ -1420,38 +1546,114 @@ app.registerExtension({
 								<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
 									<button class="instaraw-rpg-mode-toggle-btn ${node.properties.generation_style !== 'creative' ? 'active' : ''}" data-mode="reality" style="padding: 12px; border: 2px solid ${node.properties.generation_style !== 'creative' ? '#60a5fa' : '#4b5563'}; background: ${node.properties.generation_style !== 'creative' ? 'rgba(59, 130, 246, 0.1)' : 'transparent'}; border-radius: 6px; cursor: pointer; transition: all 0.2s;">
 										<div style="font-weight: 600; font-size: 13px; color: ${node.properties.generation_style !== 'creative' ? '#60a5fa' : '#e5e7eb'};">🎯 Reality Mode</div>
-										<div style="font-size: 11px; color: #9ca3af; margin-top: 4px;">Strict adherence to library prompts</div>
+										<div style="font-size: 11px; color: #9ca3af; margin-top: 4px;">${detectedMode === 'img2img' ? 'Describe image accurately' : 'Strict adherence to library prompts'}</div>
 									</button>
 									<button class="instaraw-rpg-mode-toggle-btn ${node.properties.generation_style === 'creative' ? 'active' : ''}" data-mode="creative" style="padding: 12px; border: 2px solid ${node.properties.generation_style === 'creative' ? '#8b5cf6' : '#4b5563'}; background: ${node.properties.generation_style === 'creative' ? 'rgba(139, 92, 246, 0.1)' : 'transparent'}; border-radius: 6px; cursor: pointer; transition: all 0.2s;">
 										<div style="font-weight: 600; font-size: 13px; color: ${node.properties.generation_style === 'creative' ? '#8b5cf6' : '#e5e7eb'};">✨ Creative Mode</div>
-										<div style="font-size: 11px; color: #9ca3af; margin-top: 4px;">Inspired by library prompts (flexible)</div>
+										<div style="font-size: 11px; color: #9ca3af; margin-top: 4px;">${detectedMode === 'img2img' ? 'Transform using library style' : 'Inspired by library prompts (flexible)'}</div>
 									</button>
 								</div>
 							</div>
 
-							<!-- img2img: Affect Elements -->
+							<!-- img2img: Image Preview & Settings -->
 							${detectedMode === 'img2img' ? `
-								<div class="instaraw-rpg-affect-elements">
-									<label class="instaraw-rpg-section-label">Affect Elements (unchecked = describe as-is)</label>
-									<div class="instaraw-rpg-checkbox-grid">
-										<label class="instaraw-rpg-checkbox-label">
-											<input type="checkbox" class="instaraw-rpg-checkbox instaraw-rpg-affect-background" />
-											<span>Background</span>
-										</label>
-										<label class="instaraw-rpg-checkbox-label">
-											<input type="checkbox" class="instaraw-rpg-checkbox instaraw-rpg-affect-outfit" />
-											<span>Outfit</span>
-										</label>
-										<label class="instaraw-rpg-checkbox-label">
-											<input type="checkbox" class="instaraw-rpg-checkbox instaraw-rpg-affect-pose" />
-											<span>Pose</span>
-										</label>
-										<label class="instaraw-rpg-checkbox-label">
-											<input type="checkbox" class="instaraw-rpg-checkbox instaraw-rpg-affect-lighting" />
-											<span>Lighting</span>
-										</label>
+								<!-- Images from AIL Preview -->
+								${(() => {
+									const linkedImages = node._linkedImages || [];
+									const imageCount = linkedImages.length;
+
+									if (imageCount === 0) {
+										return `
+											<div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 6px; padding: 12px; margin-bottom: 12px;">
+												<div style="font-size: 12px; color: #fca5a5; font-weight: 500;">⚠️ No images from AIL</div>
+												<div style="font-size: 11px; color: #9ca3af; margin-top: 4px;">Connect an Advanced Image Loader node in img2img mode</div>
+											</div>
+										`;
+									}
+
+									return `
+										<div style="background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.2); border-radius: 6px; padding: 12px; margin-bottom: 12px;">
+											<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+												<span style="font-size: 12px; font-weight: 500; color: #e5e7eb;">Images from AIL #${node._linkedAILNodeId || '?'}</span>
+												<span style="font-size: 11px; color: #818cf8; font-weight: 500;">${imageCount} unique ${imageCount === 1 ? 'image' : 'images'} → ${imageCount} ${imageCount === 1 ? 'prompt' : 'prompts'}</span>
+											</div>
+											<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 8px; max-height: 200px; overflow-y: auto;">
+												${linkedImages.map((img, idx) => `
+													<div style="position: relative; aspect-ratio: 1; border-radius: 4px; overflow: hidden; border: 2px solid #4b5563;">
+														<img src="${img.url}" style="width: 100%; height: 100%; object-fit: cover;" />
+														<div style="position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.7); padding: 2px 4px; font-size: 10px; color: white; text-align: center;">
+															#${idx + 1}${img.repeat_count && img.repeat_count > 1 ? ` ×${img.repeat_count}` : ''}
+														</div>
+													</div>
+												`).join('')}
+											</div>
+											<div style="font-size: 10px; color: #9ca3af; margin-top: 8px;">
+												ℹ️ Generates 1 prompt per unique image. Repeat counts preserved when adding to batch.
+											</div>
+										</div>
+									`;
+								})()}
+
+								<!-- Affect Elements (Creative mode only) -->
+								${node.properties.generation_style === 'creative' ? `
+									<div class="instaraw-rpg-affect-elements" style="margin-bottom: 12px;">
+										<label class="instaraw-rpg-section-label">Affect Elements (unchecked = keep as-is)</label>
+										<div class="instaraw-rpg-checkbox-grid">
+											<label class="instaraw-rpg-checkbox-label">
+												<input type="checkbox" class="instaraw-rpg-checkbox instaraw-rpg-affect-background" />
+												<span>Background</span>
+											</label>
+											<label class="instaraw-rpg-checkbox-label">
+												<input type="checkbox" class="instaraw-rpg-checkbox instaraw-rpg-affect-outfit" />
+												<span>Outfit</span>
+											</label>
+											<label class="instaraw-rpg-checkbox-label">
+												<input type="checkbox" class="instaraw-rpg-checkbox instaraw-rpg-affect-pose" />
+												<span>Pose</span>
+											</label>
+											<label class="instaraw-rpg-checkbox-label">
+												<input type="checkbox" class="instaraw-rpg-checkbox instaraw-rpg-affect-lighting" />
+												<span>Lighting</span>
+											</label>
+										</div>
 									</div>
-								</div>
+								` : ''}
+
+								<!-- Library Inspiration (Creative mode only) -->
+								${node.properties.generation_style === 'creative' ? `
+									<div class="instaraw-rpg-library-controls">
+										<label style="font-size: 13px; font-weight: 500; margin-bottom: 6px; display: block;">Library Inspiration</label>
+										${(() => {
+											const filters = JSON.parse(node.properties.library_filters || "{}");
+											const filteredCount = filterPrompts(promptsDatabase, filters).length;
+											const totalCount = promptsDatabase.length;
+											const hasActiveFilters = Object.keys(filters).some(key => {
+												if (key === 'search_query') return filters[key]?.trim();
+												if (key === 'show_bookmarked') return filters[key];
+												if (key === 'sdxl_mode') return filters[key];
+												return filters[key] !== 'all';
+											});
+
+											return `
+												<div style="background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.2); border-radius: 6px; padding: 10px;">
+													<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
+														<span style="font-size: 11px; color: #d1d5db;">Learn from</span>
+														<input type="number" class="instaraw-rpg-number-input instaraw-rpg-inspiration-count" value="${node.properties.inspiration_count || 3}" min="0" max="10" style="width: 45px; height: 24px; padding: 2px 6px; font-size: 12px; text-align: center;" />
+														<span style="font-size: 11px; color: #d1d5db;">prompts for style guidance</span>
+													</div>
+													<div style="display: flex; align-items: center; justify-content: space-between;">
+														<span style="font-size: 11px; color: #9ca3af;">
+															Pool: <strong style="color: #e5e7eb; font-weight: 500;">${filteredCount.toLocaleString()}</strong> ${hasActiveFilters ? '<span style="color: #818cf8;">prompts (filtered)</span>' : 'prompts'}
+														</span>
+														<button class="instaraw-rpg-btn-text instaraw-rpg-open-library-tab-btn" style="font-size: 10px; padding: 3px 6px; opacity: 0.8; display: flex; align-items: center; gap: 4px;" title="Switch to Library tab to adjust filters">
+															<span style="color: #9ca3af;">Filters</span> ⚙️
+														</button>
+													</div>
+												</div>
+											`;
+										})()}
+									</div>
+								` : ''}
 							` : `
 								<!-- txt2img: Library Inspiration & User Input -->
 								<div class="instaraw-rpg-txt2img-settings">
@@ -1495,21 +1697,33 @@ app.registerExtension({
 							`}
 						</div>
 
-						<!-- Generation Count -->
-						<div class="instaraw-rpg-section">
-							<div class="instaraw-rpg-control-group">
-								<label>Generation Count</label>
-								<input type="number" class="instaraw-rpg-number-input instaraw-rpg-gen-count-input" value="${node.properties.generation_count || 5}" min="1" max="50" />
+						<!-- Generation Count (txt2img only) -->
+						${detectedMode !== 'img2img' ? `
+							<div class="instaraw-rpg-section">
+								<div class="instaraw-rpg-control-group">
+									<label>Generation Count</label>
+									<input type="number" class="instaraw-rpg-number-input instaraw-rpg-gen-count-input" value="${node.properties.generation_count || 5}" min="1" max="50" />
+								</div>
 							</div>
+						` : ''}
 
+						<!-- Advanced: Edit System Prompt -->
+						<div class="instaraw-rpg-section">
 							<!-- Advanced: Edit System Prompt -->
 							<details class="instaraw-rpg-advanced-settings" style="margin-top: 12px; padding: 12px; background: #1f2937; border: 1px solid #4b5563; border-radius: 4px;">
 								<summary style="cursor: pointer; font-weight: 500; font-size: 12px; color: #9ca3af; user-select: none;">⚙️ Advanced: Edit System Prompt</summary>
 								<div style="margin-top: 12px;">
-									<textarea class="instaraw-rpg-system-prompt instaraw-rpg-prompt-textarea" style="font-family: monospace; font-size: 11px; line-height: 1.5; resize: vertical; width: 100%; overflow-y: hidden;">${escapeHtml(node.properties.creative_system_prompt || DEFAULT_RPG_SYSTEM_PROMPT)}</textarea>
+									<textarea class="instaraw-rpg-system-prompt instaraw-rpg-prompt-textarea" style="font-family: monospace; font-size: 11px; line-height: 1.5; resize: vertical; width: 100%; overflow-y: hidden;">${escapeHtml(node.properties.creative_system_prompt || (() => {
+										if (detectedMode === 'txt2img') {
+											return DEFAULT_RPG_SYSTEM_PROMPT;
+										} else {
+											// img2img: choose based on generation_style
+											return node.properties.generation_style === 'reality' ? DEFAULT_IMG2IMG_REALITY_SYSTEM_PROMPT : DEFAULT_IMG2IMG_CREATIVE_SYSTEM_PROMPT;
+										}
+									})())}</textarea>
 									<div style="display: flex; align-items: center; justify-content: space-between; margin-top: 8px;">
 										<div class="instaraw-rpg-hint-text" style="font-size: 10px; color: #9ca3af;">
-											💡 Controls how prompts are generated and formatted
+											💡 Controls how prompts are generated (${detectedMode === 'img2img' ? 'img2img' : 'txt2img'} ${node.properties.generation_style || 'reality'})
 										</div>
 										<button class="instaraw-rpg-btn-text instaraw-rpg-reset-unified-system-prompt-btn" style="font-size: 11px; padding: 4px 8px;">🔄 Reset</button>
 									</div>
@@ -2702,18 +2916,27 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 					const detectedMode = node._linkedAILMode || "txt2img";
 					const isImg2Img = detectedMode === "img2img";
 
-					// Common settings
-					const generationCount = parseInt(genCountInput?.value || "5");
-					const forceRegenerate = true; // Always regenerate
-					const isSDXL = isSDXLCheckbox?.checked || false;
-
 					// Mode-specific settings
 					let affectElements = [];
 					let userInput = "";
 					let inspirationCount = 0;
+					let uniqueImages = [];
+					let generationCount = 0;
 
 					if (isImg2Img) {
-						// IMG2IMG: Collect affect elements
+						// IMG2IMG: Get unique images from AIL
+						uniqueImages = node._linkedImages || [];
+
+						if (uniqueImages.length === 0) {
+							console.error("[RPG] ❌ No images from AIL");
+							alert("No images from AIL. Please connect an Advanced Image Loader node in img2img mode.");
+							return;
+						}
+
+						// Generation count = number of unique images
+						generationCount = uniqueImages.length;
+
+						// Collect affect elements
 						const affectBackground = container.querySelector(".instaraw-rpg-affect-background")?.checked;
 						const affectOutfit = container.querySelector(".instaraw-rpg-affect-outfit")?.checked;
 						const affectPose = container.querySelector(".instaraw-rpg-affect-pose")?.checked;
@@ -2723,6 +2946,14 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 						if (affectOutfit) affectElements.push("outfit");
 						if (affectPose) affectElements.push("pose");
 						if (affectLighting) affectElements.push("lighting");
+
+						// Get inspiration count (for Creative mode only)
+						const inspirationCountInput = container.querySelector(".instaraw-rpg-inspiration-count");
+						if (inspirationCountInput && node.properties.generation_style === 'creative') {
+							inspirationCount = parseInt(inspirationCountInput?.value || "3");
+						}
+
+						console.log(`[RPG] 🖼️ img2img mode: ${uniqueImages.length} unique images → ${generationCount} prompts`);
 					} else {
 						// TXT2IMG: Collect user input and inspiration
 						const userTextInput = container.querySelector(".instaraw-rpg-user-text-input");
@@ -2730,28 +2961,27 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 
 						userInput = userTextInput?.value?.trim() || "";
 						inspirationCount = parseInt(inspirationCountInput?.value || "3");
+						generationCount = parseInt(genCountInput?.value || "5");
 					}
+
+					const forceRegenerate = true; // Always regenerate
+					const isSDXL = isSDXLCheckbox?.checked || false;
 
 					// Prepare source prompt pool (each generation will sample from this)
 					let sourcePromptPool = [];
-					if (detectedMode === 'txt2img' && inspirationCount > 0) {
-						// TXT2IMG: Build filtered pool for sampling
+					if (inspirationCount > 0) {
+						// Build filtered pool for sampling (both txt2img and img2img Creative mode)
 						const filters = JSON.parse(node.properties.library_filters || "{}");
 						sourcePromptPool = filterPrompts(promptsDatabase, filters);
 
-						if (sourcePromptPool.length === 0) {
+						if (sourcePromptPool.length === 0 && detectedMode === 'txt2img') {
 							console.warn("[RPG] ⚠️ No prompts available after filtering - generating without inspiration");
 							alert("No prompts match the current filters. Adjust filters or generate without inspiration.");
 							return;
 						}
-						console.log(`[RPG] 🎲 Prepared pool of ${sourcePromptPool.length} prompts for sampling (each generation gets unique ${inspirationCount} prompts)`);
-					} else if (detectedMode === 'img2img') {
-						// IMG2IMG: Use batch prompts as pool
-						const promptQueue = parsePromptBatch();
-						sourcePromptPool = promptQueue.filter((p) => p.source_id);
-						if (sourcePromptPool.length === 0) {
-							alert("No prompts in batch to use as inspiration for img2img mode.");
-							return;
+
+						if (sourcePromptPool.length > 0) {
+							console.log(`[RPG] 🎲 Prepared pool of ${sourcePromptPool.length} prompts for sampling (inspiration: ${inspirationCount} per generation)`);
 						}
 					}
 
@@ -2873,6 +3103,7 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 									thisPromptSources,
 									userInput,
 									useCharacter ? characterDescription : "",
+									affectElements,
 									customTemplate
 								);
 
@@ -2888,6 +3119,22 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 								}
 
 								console.log(`[RPG] 📝 [${i + 1}] Starting generation with ${thisPromptSources.length} unique source prompts...`);
+
+								// For img2img: Convert image to base64
+								let imageBase64 = null;
+								if (isImg2Img && uniqueImages[i]) {
+									if (messageDiv) {
+										messageDiv.textContent = "Converting image to base64...";
+										messageDiv.className = "instaraw-rpg-progress-item-message";
+									}
+									try {
+										imageBase64 = await imageUrlToBase64(uniqueImages[i].url);
+										console.log(`[RPG] 📷 [${i + 1}] Image converted to base64 (${imageBase64.length} chars)`);
+									} catch (error) {
+										console.error(`[RPG] ❌ [${i + 1}] Failed to convert image:`, error);
+										throw new Error(`Failed to convert image ${i + 1}: ${error.message}`);
+									}
+								}
 
 								// Build payload
 								const payload = {
@@ -2911,6 +3158,11 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 									user_input: userInput,
 									generation_style: generationStyle
 								};
+
+								// Add images for img2img mode
+								if (isImg2Img && imageBase64) {
+									payload.images = [imageBase64];
+								}
 
 								// Retry logic
 								const maxRetries = 3;
@@ -3104,7 +3356,15 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 						// Wait for all to complete
 						const results = await Promise.allSettled(promises);
 						const successResults = results.filter(r => r.status === 'fulfilled' && r.value.status === 'success');
-						successResults.forEach(r => allGeneratedPrompts.push(r.value.prompt));
+						successResults.forEach(r => {
+							const promptData = r.value.prompt;
+							// For img2img: attach image index and repeat count
+							if (isImg2Img && uniqueImages[r.value.index]) {
+								promptData._imageIndex = r.value.index;
+								promptData._repeatCount = uniqueImages[r.value.index].repeat_count || 1;
+							}
+							allGeneratedPrompts.push(promptData);
+						});
 
 						console.log(`[RPG] ✅ Parallel generation complete: ${successResults.length}/${generationCount} succeeded`);
 
@@ -3200,14 +3460,21 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 
 					const promptQueue = parsePromptBatch();
 					node._generatedUnifiedPrompts.forEach((p) => {
+						// For img2img: use stored repeat count, otherwise default to 1
+						const repeatCount = p._repeatCount || 1;
+
 						promptQueue.push({
 							id: generateUniqueId(),
 							positive_prompt: p.positive || "",
 							negative_prompt: p.negative || "",
-							repeat_count: 1,
+							repeat_count: repeatCount,
 							tags: p.tags || [],
 							source_id: null,
+							// Store image index for img2img (for reference)
+							_imageIndex: p._imageIndex,
 						});
+
+						console.log(`[RPG] Added prompt to batch with repeat count: ${repeatCount}${p._imageIndex !== undefined ? ` (image #${p._imageIndex + 1})` : ''}`);
 					});
 
 					setPromptBatchData(promptQueue);
@@ -4011,13 +4278,27 @@ DO NOT use tags like "1girl, solo" or similar categorization prefixes.`;
 							// Clear custom prompt and reset to default
 							node.properties.creative_system_prompt = "";
 
+							// Determine which default to use based on current mode AND generation style
+							const detectedMode = node._linkedAILMode || "txt2img";
+							const generationStyle = node.properties.generation_style || "reality";
+
+							let defaultPrompt;
+							if (detectedMode === 'txt2img') {
+								// txt2img: both styles use same template
+								defaultPrompt = DEFAULT_RPG_SYSTEM_PROMPT;
+							} else {
+								// img2img: different templates for Reality vs Creative
+								defaultPrompt = generationStyle === 'reality' ? DEFAULT_IMG2IMG_REALITY_SYSTEM_PROMPT : DEFAULT_IMG2IMG_CREATIVE_SYSTEM_PROMPT;
+							}
+
 							// Update textarea to show default
 							const systemPromptTextarea = container.querySelector(".instaraw-rpg-system-prompt");
 							if (systemPromptTextarea) {
-								systemPromptTextarea.value = DEFAULT_RPG_SYSTEM_PROMPT;
+								systemPromptTextarea.value = defaultPrompt;
 								autoResizeTextarea(systemPromptTextarea);
 							}
 
+							console.log(`[RPG] Reset system prompt to ${detectedMode} ${generationStyle} default`);
 							app.graph.setDirtyCanvas(true, true);
 						};
 					}

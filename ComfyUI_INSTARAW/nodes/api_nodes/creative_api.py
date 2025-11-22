@@ -27,10 +27,13 @@ CORS_HEADERS = {
 
 
 # === Gemini Integration ===
-async def generate_with_gemini(system_prompt, user_prompt, model="gemini-2.5-pro", api_key=None, temperature=0.9, top_p=0.9):
+async def generate_with_gemini(system_prompt, user_prompt, model="gemini-2.5-pro", api_key=None, temperature=0.9, top_p=0.9, images=None):
     """
     Generate creative prompts using Google Gemini API.
     Returns a list of {positive, negative, tags} dictionaries.
+
+    Args:
+        images: List of base64-encoded image strings (for vision/img2img mode)
     """
     try:
         from google import genai
@@ -61,11 +64,38 @@ async def generate_with_gemini(system_prompt, user_prompt, model="gemini-2.5-pro
                        "HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_SEXUALLY_EXPLICIT"]
         ]
 
-        response = await async_client.generate_content_async(
-            f"{system_prompt}\n\n{user_prompt}",
-            generation_config=generation_config,
-            safety_settings=safety_settings
-        )
+        # Build content for API call
+        if images and len(images) > 0:
+            # Vision mode: include images with text
+            import base64
+            import PIL.Image
+            import io
+
+            content_parts = [f"{system_prompt}\n\n{user_prompt}"]
+
+            for img_base64 in images:
+                try:
+                    # Decode base64 to image
+                    img_data = base64.b64decode(img_base64)
+                    img = PIL.Image.open(io.BytesIO(img_data))
+                    content_parts.append(img)
+                    print(f"[RPG Creative API] Added image to Gemini vision request: {img.size}")
+                except Exception as img_error:
+                    print(f"[RPG Creative API] Failed to decode image: {img_error}")
+                    # Continue without this image
+
+            response = await async_client.generate_content_async(
+                content_parts,
+                generation_config=generation_config,
+                safety_settings=safety_settings
+            )
+        else:
+            # Text-only mode
+            response = await async_client.generate_content_async(
+                f"{system_prompt}\n\n{user_prompt}",
+                generation_config=generation_config,
+                safety_settings=safety_settings
+            )
 
         if not response.candidates:
             raise Exception("Gemini returned no candidates (likely blocked by safety filters)")
@@ -440,7 +470,7 @@ async def _generate_creative_prompts(request):
             print(f"[RPG Creative API] Inspiration prompts: {len(random_inspiration_prompts)}, User input: {len(user_text_input)} chars")
 
         if model.startswith("gemini"):
-            prompts = await generate_with_gemini(system_prompt, user_prompt, model, gemini_api_key, temperature, top_p)
+            prompts = await generate_with_gemini(system_prompt, user_prompt, model, gemini_api_key, temperature, top_p, images=images)
         elif model.startswith("grok"):
             prompts = await generate_with_grok(system_prompt, user_prompt, model, grok_api_key, temperature, top_p)
         else:
